@@ -1,19 +1,24 @@
 import { ApiProperty } from "@nestjs/swagger";
+import { IsEmail, IsString, MinDate, MinLength } from "class-validator";
 
 export class CreateUserDto {
-     @ApiProperty({ example: 'Ben Ahmed' })
+  @ApiProperty()
+  @IsString()
+  @MinLength(3)
   nom: string;
 
-  @ApiProperty({ example: 'Ali' })
+  @ApiProperty()
+  @IsString()
+  @MinLength(3)
   prenom: string;
 
-  @ApiProperty({ example: 'ali@email.com' })
+  @ApiProperty()
+  @IsEmail({}, { message: 'Format email invalide' })
   email: string;
 
-  @ApiProperty({ example: 'password123' })
+  @ApiProperty()
+  @MinLength(8, { message: 'Le mot de passe doit faire au moins 8 caractères' })
   mot_de_passe: string;
 
-  @ApiProperty({ example: 'ADHERENT' })
-  role: string;
-
+  
 }

@@ -22,7 +22,7 @@ export class AuthService {
     }
 
     // 3. Comparer le mot de passe envoyé avec celui crypté en base
-    
+
     const isMatch = await bcrypt.compare(pass, user.mot_de_passe);
     if (!isMatch) {
       throw new UnauthorizedException('Mot de passe incorrecte');
@@ -38,5 +38,20 @@ export class AuthService {
         role: user.role,
       },
     };
+  }
+  // Dans le service (auth.service.ts par exemple)
+  async verifyCode(email: string, code: string) {
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { email },
+    });
+
+    if (user && user.code_verification === code) {
+      await this.prisma.utilisateurs.update({
+        where: { email },
+        data: { est_verifie: true, code_verification: null },
+      });
+      return { message: 'Email vérifié avec succès !' };
+    }
+    throw new UnauthorizedException('Code incorrect');
   }
 }

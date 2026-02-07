@@ -223,13 +223,15 @@ model utilisateurs {
   prenom                                                          String                  @db.VarChar(100)
   mot_de_passe                                                    String                  @db.VarChar(255)
   email                                                           String                  @unique @db.VarChar(255)
-  role                                                            String?                 @db.VarChar(50)
-  genre                                                           String                  @db.VarChar(10)
-  date_naissance                                                  DateTime                @db.Date
-  objectif_principal                                              String                  @db.VarChar(255)
-  niveau_sportif                                                  String                  @db.VarChar(100)
+  role                                                            String                  @db.VarChar(50)
+  genre                                                           String?                 @db.VarChar(10)
+  date_naissance                                                  DateTime?               @db.Date
+  objectif_principal                                              String?                 @db.VarChar(255)
+  niveau_sportif                                                  String?                 @db.VarChar(100)
   photo_profil_url                                                String?                 @db.VarChar(255)
   compte_actif                                                    Boolean?                @default(true)
+  code_verification                                               String?                 @db.VarChar(6)
+  est_verifie                                                     Boolean?                @default(false)
   abonnements_membres                                             abonnements_membres[]
   allergies                                                       allergies[]
   blessures                                                       blessures[]
