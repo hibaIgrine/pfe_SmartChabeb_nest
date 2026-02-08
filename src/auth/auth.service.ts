@@ -18,14 +18,14 @@ export class AuthService {
 
     // 2. Vérifier si l'utilisateur existe
     if (!user) {
-      throw new UnauthorizedException('User nexiste pas');
+      throw new UnauthorizedException("Ce utilisateur n'existe pas veuillez vous s'inscrire?");
     }
 
     // 3. Comparer le mot de passe envoyé avec celui crypté en base
 
     const isMatch = await bcrypt.compare(pass, user.mot_de_passe);
     if (!isMatch) {
-      throw new UnauthorizedException('Mot de passe incorrecte');
+      throw new UnauthorizedException('Le mot de passe est incorrecte.');
     }
 
     // 4. Si c'est bon, on génère le Token JWT
