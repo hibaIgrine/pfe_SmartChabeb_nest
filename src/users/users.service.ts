@@ -1,15 +1,19 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import {ConflictException,Injectable,UnauthorizedException,} from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
+import { MailerService } from '@nestjs-modules/mailer';
+import { UpdateUserDto } from './dto/update-user.dto';
+
 @Injectable()
 export class UsersService {
-  //inject service prisma
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private mailerService: MailerService,
+  ) {}
 
   async create(createUserDto: any) {
     try {
+      // 1. Hachage du mot de passe et génération du code
       const salt = await bcrypt.genSalt();
       const hashedPassword = await bcrypt.hash(
         createUserDto.mot_de_passe,
@@ -17,6 +21,7 @@ export class UsersService {
       );
       const vCode = Math.floor(1000 + Math.random() * 9000).toString();
 
+      // 2. Création de l'utilisateur dans la base de données
       const user = await this.prisma.utilisateurs.create({
         data: {
           nom: createUserDto.nom,
@@ -29,10 +34,32 @@ export class UsersService {
         },
       });
 
-      console.log(`✅ SUCCÈS : Code pour ${user.email} est : ${vCode}`);
+      console.log(`✅ Utilisateur créé : ${user.email}. Code : ${vCode}`);
+
+      // 3. Envoi du mail (dans un bloc try/catch séparé pour ne pas bloquer si le mail échoue)
+      try {
+        await this.mailerService.sendMail({
+          to: user.email,
+          subject: 'Bienvenue chez SmartChabeb - Code de vérification',
+          html: `
+            <div style="font-family: Arial, sans-serif; border: 1px solid #ddd; padding: 20px;">
+              <h3>Bienvenue ${user.prenom} !</h3>
+              <p>Merci de vous être inscrit sur la plateforme SmartChabeb.</p>
+              <p>Votre code de vérification est : <b style="font-size: 20px; color: #007bff;">${vCode}</b></p>
+              <p>Ce code est nécessaire pour activer votre compte sur l'application mobile.</p>
+            </div>
+          `,
+        });
+        console.log(`📧 Email envoyé avec succès à ${user.email}`);
+      } catch (mailError) {
+        console.error("❌ Erreur d'envoi d'email :", mailError);
+        // On ne bloque pas la création du compte si l'email ne part pas,
+        // l'admin pourra toujours voir le code dans le terminal ou pgAdmin.
+      }
+
       return user;
     } catch (error) {
-      // Si l'erreur est un doublon d'email (Code P2002 de Prisma)
+      // Gestion de l'erreur email déjà utilisé (P2002 = Unique Constraint dans Prisma)
       if (error.code === 'P2002') {
         throw new ConflictException(
           'Cet email est déjà utilisé par un autre compte.',
@@ -43,22 +70,19 @@ export class UsersService {
   }
 
   async verifyEmail(email: string, code: string) {
-    // 1. Chercher l'utilisateur par son email
     const user = await this.prisma.utilisateurs.findUnique({
       where: { email: email },
     });
 
-    // 2. Vérifier si l'utilisateur existe et si le code est le bon
     if (!user || user.code_verification !== code) {
       throw new UnauthorizedException('Le code de vérification est incorrect.');
     }
 
-    // 3. Si c'est bon, on valide l'utilisateur et on efface le code
     return await this.prisma.utilisateurs.update({
       where: { email: email },
       data: {
         est_verifie: true,
-        code_verification: null, // Le code ne sert plus à rien
+        code_verification: null,
       },
     });
   }
@@ -72,29 +96,28 @@ export class UsersService {
       },
     });
   }
+
   async saveBiometrics(dto: any) {
-    // 1. On cherche l'utilisateur par son email pour avoir son ID
     const user = await this.prisma.utilisateurs.findUnique({
       where: { email: dto.email },
     });
 
-    if (!user) throw new Error('Utilisateur non trouvé');
+    if (!user) throw new UnauthorizedException('Utilisateur non trouvé');
 
-    // 2. Calcul de l'IMC : Poids / (Taille en mètre * Taille en mètre)
     const tailleEnMetres = dto.taille / 100;
     const imcCalculé = dto.poids / (tailleEnMetres * tailleEnMetres);
 
-    // 3. Enregistrement dans la table suivi_biometrique
     return await this.prisma.suivi_biometrique.create({
       data: {
         id_utilisateur: user.id,
         poids_kg: dto.poids,
         taille_cm: dto.taille,
-        imc: parseFloat(imcCalculé.toFixed(2)), // On arrondit à 2 chiffres
+        imc: parseFloat(imcCalculé.toFixed(2)),
         date_mesure: new Date(),
       },
     });
   }
+
   async findAll() {
     return await this.prisma.utilisateurs.findMany();
   }
@@ -104,12 +127,16 @@ export class UsersService {
       where: { id: id },
     });
   }
-
-  update(id: string, updateUserDto: UpdateUserDto) {
-    return `This action updates a #${id} user`;
+  // Ajoute cette méthode pour corriger l'erreur TS2339
+  async update(id: string, updateUserDto: UpdateUserDto) {
+    return await this.prisma.utilisateurs.update({
+      where: { id: id },
+      data: updateUserDto,
+    });
   }
-
-  remove(id: string) {
-    return `This action removes a #${id} user`;
+  async remove(id: string) {
+    return await this.prisma.utilisateurs.delete({
+      where: { id: id },
+    });
   }
 }
