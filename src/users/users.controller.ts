@@ -1,7 +1,6 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards ,Request} from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { VerifyUserDto } from './dto/verify-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -10,7 +9,7 @@ import { BiometricsDto } from './dto/biometrics.dto';
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
-  
+
   @Patch('update-profile')
   async updateProfile(@Body() updateProfileDto: UpdateProfileDto) {
     // On passe l'email pour trouver l'utilisateur et le DTO pour les données
@@ -43,7 +42,12 @@ export class UsersController {
   findAll() {
     return this.usersService.findAll();
   }
-
+  @Get('me/profile')
+  @UseGuards(AuthGuard('jwt')) // Seul un utilisateur connecté peut voir son profil
+  async getMyProfile(@Request() req:any) {
+    // req.user contient l'ID extrait du Token JWT
+    return await this.usersService.getProfileWithBiometrics(req.user.userId);
+  }
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.usersService.findOne(id);

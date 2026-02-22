@@ -195,12 +195,24 @@ model reclamations {
 }
 
 model salles {
-  id              String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  nom             String?        @db.VarChar(100)
-  ville           String?        @db.VarChar(100)
+  // On garde le type Uuid pour la cohérence avec ta base
+  id              String         @id @default(uuid()) @db.Uuid
+  
+  // On enlève les ? sur nom et ville car un centre doit forcément avoir un nom et être dans une ville
+  nom             String         @db.VarChar(100)
+  ville           String         @db.VarChar(100)
+  
   adresse         String?        @db.VarChar(255)
   telephone_salle String?        @db.VarChar(20)
-  date_creation   DateTime?      @default(dbgenerated("CURRENT_DATE")) @db.Date
+  
+  // AJOUTE CES DEUX LIGNES (Float? signifie que c'est optionnel pour l'instant)
+  latitude        Float?
+  longitude       Float?
+  
+  // Utilisation de now() pour que Prisma gère la date automatiquement
+  date_creation   DateTime?      @default(now()) @db.Date
+  
+  // Relations (ne pas toucher)
   equipements     equipements[]
   produits        produits[]
   utilisateurs    utilisateurs[]

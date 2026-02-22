@@ -139,4 +139,15 @@ export class UsersService {
       where: { id: id },
     });
   }
+  async getProfileWithBiometrics(userId: string) {
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { id: userId },
+      include: {
+        suivi_biometrique: true, // Ceci va inclure la liste des mesures de l'utilisateur
+      },
+    });
+
+    if (!user) throw new UnauthorizedException('Utilisateur non trouvé');
+    return user;
+  }
 }

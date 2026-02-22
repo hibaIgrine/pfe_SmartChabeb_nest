@@ -6,6 +6,8 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { ConfigModule } from '@nestjs/config';
+import { ForfaitsModule } from './forfaits/forfaits.module';
+import { SallesModule } from './salles/salles.module';
 
 @Module({
   imports: [
@@ -29,6 +31,10 @@ import { ConfigModule } from '@nestjs/config';
         from: `"${process.env.MAIL_FROM_NAME}" <${process.env.MAIL_FROM}>`,
       },
     }),
+
+    ForfaitsModule,
+
+    SallesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
