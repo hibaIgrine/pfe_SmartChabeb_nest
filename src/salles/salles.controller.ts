@@ -1,14 +1,28 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+} from '@nestjs/common';
 import { SallesService } from './salles.service';
 import { CreateSalleDto } from './dto/create-salle.dto';
 import { UpdateSalleDto } from './dto/update-salle.dto';
+import { AuthGuard } from '@nestjs/passport';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 @Controller('salles')
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 export class SallesController {
   constructor(private readonly sallesService: SallesService) {}
 
   @Post()
-  create(@Body() createSalleDto: CreateSalleDto) {
+  @Roles('ADMIN') // Seul l'Admin peut créer
+  create(@Body() createSalleDto: any) {
     return this.sallesService.create(createSalleDto);
   }
 
@@ -23,12 +37,14 @@ export class SallesController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateSalleDto: UpdateSalleDto) {
-    return this.sallesService.update(+id, updateSalleDto);
+  @Roles('ADMIN')
+  update(@Param('id') id: string, @Body() updateSalleDto: any) {
+    return this.sallesService.update(id, updateSalleDto);
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   remove(@Param('id') id: string) {
-    return this.sallesService.remove(+id);
+    return this.sallesService.remove(id);
   }
 }
