@@ -8,6 +8,7 @@ import { MailerModule } from '@nestjs-modules/mailer';
 import { ConfigModule } from '@nestjs/config';
 import { ForfaitsModule } from './forfaits/forfaits.module';
 import { SallesModule } from './salles/salles.module';
+import { ProgrammesModule } from './programmes/programmes.module';
 
 @Module({
   imports: [
@@ -35,6 +36,8 @@ import { SallesModule } from './salles/salles.module';
     ForfaitsModule,
 
     SallesModule,
+
+    ProgrammesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
