@@ -7,17 +7,20 @@ import { PrismaService } from 'src/prisma/prisma.service';
 export class SallesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(dto: any) {
-    return await this.prisma.salles.create({
-      data: {
-        nom: dto.nom,
-        gouvernorat: dto.gouvernorat, // mis à jour
-        delegation: dto.delegation, // ajouté
-        code_postal: dto.code_postal, // ajouté
-        adresse: dto.adresse,
-        telephone_salle: dto.telephone_salle,
-      },
-    });
+  async create(createSalleDto: any) {
+    try {
+      return await this.prisma.salles.create({
+        data: createSalleDto,
+      });
+    } catch (error) {
+      // Code P2002 = Erreur de violation de contrainte unique (doublon)
+      if (error.code === 'P2002') {
+        throw new ConflictException(
+          'Un centre avec ce nom existe déjà en Tunisie.',
+        );
+      }
+      throw error;
+    }
   }
 
   async findAll() {
