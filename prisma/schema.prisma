@@ -234,6 +234,8 @@ model utilisateurs {
   niveau_sportif                                                  String?                 @db.VarChar(100)
   photo_profil_url                                                String?                 @db.VarChar(255)
   compte_actif                                                    Boolean?                @default(true)
+  date_fin_ban                                                    DateTime?
+  motif_ban                                                       String?                 @db.VarChar(255)
   code_verification                                               String?                 @db.VarChar(6)
   est_verifie                                                     Boolean?                @default(false)
   abonnements_membres                                             abonnements_membres[]

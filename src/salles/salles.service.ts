@@ -24,7 +24,22 @@ export class SallesService {
   }
 
   async findAll() {
-    return await this.prisma.salles.findMany();
+    return await this.prisma.salles.findMany({
+      include: {
+        // Magie Prisma : compte les relations sans charger tous les membres
+        _count: {
+          select: {
+            utilisateurs: true,
+            equipements: true,
+          },
+        },
+        // On récupère aussi les équipements en panne pour tes stats
+        equipements: {
+          where: { etat_actuel: 'Panne' }, // Adapte selon tes valeurs en base
+          select: { id: true },
+        },
+      },
+    });
   }
 
   findOne(id: number) {

@@ -118,10 +118,55 @@ export class UsersService {
     });
   }
 
+  // src/users/users.service.ts
+
   async findAll() {
-    return await this.prisma.utilisateurs.findMany();
+    return await this.prisma.utilisateurs.findMany({
+      include: {
+        salles: { select: { nom: true, gouvernorat: true } }, // Voir le centre de rattachement
+        _count: {
+          select: {
+            journal_repas: true,
+            programmes_sportifs_programmes_sportifs_id_membreToutilisateurs: true,
+          },
+        },
+      },
+      orderBy: { nom: 'asc' },
+    });
   }
 
+  // Nouvelle fonction pour changer le rôle ou bannir un utilisateur
+  async updateStatus(
+    id: string,
+    data: { role?: string; compte_actif?: boolean },
+  ) {
+    return await this.prisma.utilisateurs.update({
+      where: { id },
+      data: data,
+    });
+  }
+  async updateRole(id: string, newRole: string) {
+    // Optionnel : Empêcher de changer son propre rôle pour ne pas s'auto-bloquer
+    return await this.prisma.utilisateurs.update({
+      where: { id },
+      data: { role: newRole },
+    });
+  }
+
+  async banUser(id: string, days: number, reason: string) {
+    const finBan = new Date();
+    finBan.setDate(finBan.getDate() + days); // On ajoute X jours à aujourd'hui
+
+    return await this.prisma.utilisateurs.update({
+      where: { id },
+      data: {
+        compte_actif: false,
+        date_fin_ban: finBan,
+        motif_ban: reason,
+      },
+    });
+  }
+  
   async findOne(id: string) {
     return await this.prisma.utilisateurs.findUnique({
       where: { id: id },

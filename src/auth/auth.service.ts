@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -21,6 +21,17 @@ export class AuthService {
       throw new UnauthorizedException("Ce utilisateur n'existe pas veuillez vous s'inscrire?");
     }
 
+    const maintenant = new Date();
+    if (user.compte_actif === false) {
+      // Si la date de fin est dépassée, on pourrait réactiver auto,
+      // sinon on bloque.
+      if (user.date_fin_ban && user.date_fin_ban > maintenant) {
+        const dateStr = user.date_fin_ban.toLocaleDateString('fr-FR');
+        throw new ForbiddenException(
+          `Votre compte est suspendu jusqu'au ${dateStr}. Motif : ${user.motif_ban}`,
+        );
+      }
+    }
     // 3. Comparer le mot de passe envoyé avec celui crypté en base
 
     const isMatch = await bcrypt.compare(pass, user.mot_de_passe);
