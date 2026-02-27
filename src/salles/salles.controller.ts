@@ -7,42 +7,46 @@ import {
   Param,
   Delete,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 import { SallesService } from './salles.service';
-import { CreateSalleDto } from './dto/create-salle.dto';
-import { UpdateSalleDto } from './dto/update-salle.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
 @Controller('salles')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+// ❌ ON SUPPRIME LE @UseGuards D'ICI pour laisser l'accès public par défaut
 export class SallesController {
   constructor(private readonly sallesService: SallesService) {}
 
+  @Get()
+  // ✅ PUBLIC : Pour que Flutter puisse afficher la liste à l'étape 5
+  findAll(@Query('gouvernorat') gouvernorat?: string) {
+    return this.sallesService.findAll(gouvernorat);
+  }
+
+  @Get(':id')
+  // ✅ PUBLIC : Pour voir les détails d'un centre
+  findOne(@Param('id') id: string) {
+    return this.sallesService.findOne(+id); // Enlevé le '+' car c'est un UUID
+  }
+
   @Post()
-  @Roles('ADMIN') // Seul l'Admin peut créer
+  @UseGuards(AuthGuard('jwt'), RolesGuard) // 🔒 PROTÉGÉ
+  @Roles('ADMIN')
   create(@Body() createSalleDto: any) {
     return this.sallesService.create(createSalleDto);
   }
 
-  @Get()
-  findAll() {
-    return this.sallesService.findAll();
-  }
-
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.sallesService.findOne(+id);
-  }
-
   @Patch(':id')
+  @UseGuards(AuthGuard('jwt'), RolesGuard) // 🔒 PROTÉGÉ
   @Roles('ADMIN')
   update(@Param('id') id: string, @Body() updateSalleDto: any) {
     return this.sallesService.update(id, updateSalleDto);
   }
 
   @Delete(':id')
+  @UseGuards(AuthGuard('jwt'), RolesGuard) // 🔒 PROTÉGÉ
   @Roles('ADMIN')
   remove(@Param('id') id: string) {
     return this.sallesService.remove(id);

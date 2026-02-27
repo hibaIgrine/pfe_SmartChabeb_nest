@@ -23,21 +23,15 @@ export class SallesService {
     }
   }
 
-  async findAll() {
+  async findAll(gouvernorat?: string) {
     return await this.prisma.salles.findMany({
+      where: {
+        // On utilise 'gouvernorat' car c'est le nouveau nom de ta colonne
+        gouvernorat: gouvernorat ? { equals: gouvernorat } : undefined,
+      },
+      // On inclut les comptes pour ne pas faire planter le Web Admin
       include: {
-        // Magie Prisma : compte les relations sans charger tous les membres
-        _count: {
-          select: {
-            utilisateurs: true,
-            equipements: true,
-          },
-        },
-        // On récupère aussi les équipements en panne pour tes stats
-        equipements: {
-          where: { etat_actuel: 'Panne' }, // Adapte selon tes valeurs en base
-          select: { id: true },
-        },
+        _count: { select: { utilisateurs: true, equipements: true } },
       },
     });
   }
@@ -73,6 +67,19 @@ export class SallesService {
         );
       }
       throw error;
+    }
+  }
+  // Ajoute ceci dans UsersService
+  async assignToSalle(email: string, id_salle: string) {
+    try {
+      return await this.prisma.utilisateurs.update({
+        where: { email: email },
+        data: {
+          id_salle: id_salle, // On met à jour l'UUID de la salle
+        },
+      });
+    } catch (error) {
+      throw new Error("Erreur lors de l'assignation de la salle");
     }
   }
 }

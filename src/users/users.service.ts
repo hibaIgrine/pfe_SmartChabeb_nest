@@ -135,14 +135,12 @@ export class UsersService {
     });
   }
 
-  // Nouvelle fonction pour changer le rôle ou bannir un utilisateur
-  async updateStatus(
-    id: string,
-    data: { role?: string; compte_actif?: boolean },
-  ) {
+  // 1. Fonction GÉNERIQUE par ID (Pour l'Admin Web)
+  // Elle peut maintenant changer le rôle, le statut OU la salle d'un coup !
+  async updateStatus(id: string, data: any) {
     return await this.prisma.utilisateurs.update({
       where: { id },
-      data: data,
+      data: data, // accepte n'importe quel champ (role, compte_actif, id_salle...)
     });
   }
   async updateRole(id: string, newRole: string) {
@@ -166,7 +164,7 @@ export class UsersService {
       },
     });
   }
-  
+
   async findOne(id: string) {
     return await this.prisma.utilisateurs.findUnique({
       where: { id: id },
@@ -194,5 +192,11 @@ export class UsersService {
 
     if (!user) throw new UnauthorizedException('Utilisateur non trouvé');
     return user;
+  }
+  async assignToSalleByEmail(email: string, id_salle: string) {
+    return await this.prisma.utilisateurs.update({
+      where: { email: email },
+      data: { id_salle: id_salle },
+    });
   }
 }
