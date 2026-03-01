@@ -2,11 +2,14 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'path';
 
 async function bootstrap() {
+  // On précise <NestExpressApplication> pour accéder aux fonctions de fichiers statiques
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  const app = await NestFactory.create(AppModule);
-  //configuration de swagger
+  // 1. Configuration de Swagger
   const config = new DocumentBuilder()
     .setTitle('SmartChabeb API')
     .addBearerAuth()
@@ -16,17 +19,22 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
 
+  // 2. Validation Globale
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true, // Supprime les données envoyées qui ne sont pas dans le DTO
-      forbidNonWhitelisted: true, // Renvoie une erreur si on envoie des données en trop
-      transform: true, // Transforme les types (ex: string en number) automatiquement
+      whitelist: true,
+      transform: true,
     }),
   );
 
-  app.enableCors();
-  
-  await app.listen(3000, '0.0.0.0');
+  // 3. Rendre le dossier "uploads" public (Pour voir les photos de profil)
+  // Assure-toi de créer un dossier nommé 'uploads' à la racine du projet (à côté de src)
+ app.useStaticAssets(join(process.cwd(), 'uploads'), {
+   prefix: '/uploads/',
+ });
 
+  app.enableCors();
+
+  await app.listen(3000, '0.0.0.0');
 }
 bootstrap();

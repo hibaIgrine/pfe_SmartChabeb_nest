@@ -8,6 +8,8 @@ import {
   Delete,
   UseGuards,
   Request,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -21,14 +23,15 @@ import { BanUserDto } from './dto/ban-user.dto';
 import { ChangeRoleDto } from './dto/change-role.dto';
 import { ChangeStatusDto } from './dto/change-status.dto';
 import { AssignSalleByEmailDto } from './dto/assign-salle.dto';
-
-// ... (garder les imports identiques)
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
 
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  // --- 1. ROUTES PUBLIQUES (SANS GUARD) ---
+  // --- ROUTES PUBLIQUES ---
 
   @Post()
   create(@Body() createUserDto: CreateUserDto) {
@@ -37,7 +40,10 @@ export class UsersController {
 
   @Post('verify')
   async verify(@Body() verifyUserDto: VerifyUserDto) {
-    return await this.usersService.verifyEmail(verifyUserDto.email, verifyUserDto.code);
+    return await this.usersService.verifyEmail(
+      verifyUserDto.email,
+      verifyUserDto.code,
+    );
   }
 
   @Post('biometrics')
@@ -46,18 +52,22 @@ export class UsersController {
   }
 
   @Patch('me/assign-salle')
-  // ✅ PUBLIC : Indispensable pour la fin de l'inscription Flutter
   async assignSalleByEmail(@Body() body: AssignSalleByEmailDto) {
-    return await this.usersService.assignToSalleByEmail(body.email, body.id_salle);
+    return await this.usersService.assignToSalleByEmail(
+      body.email,
+      body.id_salle,
+    );
   }
 
   @Patch('update-profile')
-  // ✅ PUBLIC : Indispensable pour l'étape 3 de l'inscription
   async updateProfile(@Body() updateProfileDto: UpdateProfileDto) {
-    return await this.usersService.updateProfile(updateProfileDto.email, updateProfileDto);
+    return await this.usersService.updateProfile(
+      updateProfileDto.email,
+      updateProfileDto,
+    );
   }
 
-  // --- 2. ROUTES PRIVÉES (TOKEN REQUIS) ---
+  // --- ROUTES PRIVÉES & ÉDITION PROFIL ---
 
   @Get('me/profile')
   @UseGuards(AuthGuard('jwt'))
@@ -65,7 +75,38 @@ export class UsersController {
     return await this.usersService.getProfileWithBiometrics(req.user.userId);
   }
 
-  // --- 3. ROUTES ADMINISTRATIVES (ADMIN UNIQUEMENT) ---
+  // CETTE ROUTE UNIQUE GÈRE TOUT : TEXTE + IMAGE GALERIE + AVATAR ASSET
+  @Patch(':id')
+  @UseGuards(AuthGuard('jwt'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './uploads',
+        filename: (req, file, cb) => {
+          const randomName = Array(32)
+            .fill(null)
+            .map(() => Math.round(Math.random() * 16).toString(16))
+            .join('');
+          return cb(null, `${randomName}${extname(file.originalname)}`);
+        },
+      }),
+    }),
+  )
+  async update(
+    @Param('id') id: string,
+    @Body() updateUserDto: any,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    // Si un fichier est uploadé, on génère l'URL pour la base de données
+    if (file) {
+      // Remplace l'IP par celle de ton PC (192.168.1.18)
+      updateUserDto.photo_profil_url = `http://192.168.1.18:3000/uploads/${file.filename}`;
+    }
+    // On appelle ton service "Excellence" (celui qui gère le NOT id: id)
+    return await this.usersService.update(id, updateUserDto);
+  }
+
+  // --- ROUTES ADMINISTRATIVES ---
 
   @Get()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -85,7 +126,9 @@ export class UsersController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')
   async changeStatus(@Param('id') id: string, @Body() body: ChangeStatusDto) {
-    return await this.usersService.updateStatus(id, { compte_actif: body.compte_actif });
+    return await this.usersService.updateStatus(id, {
+      compte_actif: body.compte_actif,
+    });
   }
 
   @Patch(':id/ban')
@@ -98,7 +141,10 @@ export class UsersController {
   @Patch(':id/assign-salle')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')
-  async assignSalleById(@Param('id') id: string, @Body('id_salle') id_salle: string) {
+  async assignSalleById(
+    @Param('id') id: string,
+    @Body('id_salle') id_salle: string,
+  ) {
     return await this.usersService.updateStatus(id, { id_salle });
   }
 

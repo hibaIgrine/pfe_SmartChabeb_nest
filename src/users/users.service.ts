@@ -173,33 +173,55 @@ export class UsersService {
   // REMPLACE TA MÉTHODE PAR CELLE-CI (Version Excellence 🏆)
   async update(id: string, updateUserDto: any) {
     try {
-      // 1. On récupère d'abord l'utilisateur actuel dans la base
-      const currentUser = await this.prisma.utilisateurs.findUnique({
-        where: { id: id },
-      });
+      if (!id) throw new UnauthorizedException('ID utilisateur manquant');
 
+      // 1. Récupérer l'utilisateur actuel pour comparer les données
+      const currentUser = await this.prisma.utilisateurs.findUnique({
+        where: { id },
+      });
       if (!currentUser)
         throw new UnauthorizedException('Utilisateur non trouvé');
 
-      // 2. VÉRIFICATION INTELLIGENTE DE L'EMAIL
-      if (updateUserDto.email) {
-        const newEmail = updateUserDto.email.trim().toLowerCase();
+      let status = 'PROFILE_UPDATED'; // Message par défaut pour le front
 
-        // SI l'email est différent de l'ancien, ALORS on vérifie s'il est pris
-        if (newEmail !== currentUser.email.toLowerCase()) {
-          const emailOccupé = await this.prisma.utilisateurs.findUnique({
-            where: { email: newEmail },
+      // 2. Logique intelligente pour l'EMAIL
+      if (updateUserDto.email) {
+        const emailNettoyé = updateUserDto.email.trim().toLowerCase();
+
+        // Si l'email a changé par rapport à l'ancien
+        if (emailNettoyé !== currentUser.email.toLowerCase()) {
+          // Vérifier si le nouvel email n'est pas déjà pris par quelqu'un d'autre
+          const doublon = await this.prisma.utilisateurs.findFirst({
+            where: { email: emailNettoyé, NOT: { id: id } },
           });
 
-          if (emailOccupé) {
+          if (doublon) {
             throw new ConflictException(
-              'Cet email appartient déjà à un autre membre.',
+              'Cet email est déjà utilisé par un autre compte.',
             );
+          }
+
+          // --- ACTION SMART : PRÉPARER LA RE-VÉRIFICATION ---
+          const vCode = Math.floor(1000 + Math.random() * 9000).toString();
+          updateUserDto.email = emailNettoyé;
+          updateUserDto.code_verification = vCode;
+          updateUserDto.est_verifie = false; // Le compte repasse en "non vérifié"
+          status = 'VERIFY_EMAIL'; // On signalera au mobile d'ouvrir la modale OTP
+
+          // Envoi du mail avec le nouveau code
+          try {
+            await this.mailerService.sendMail({
+              to: emailNettoyé,
+              subject: 'SmartChabeb - Validation du nouvel email',
+              html: `<h3>Ton nouveau code de vérification est : ${vCode}</h3>`,
+            });
+          } catch (e) {
+            console.error("Erreur d'envoi du mail de mise à jour");
           }
         }
       }
 
-      // 3. SÉCURITÉ DU MOT DE PASSE
+      // 3. Hachage du mot de passe (si fourni)
       if (
         updateUserDto.mot_de_passe &&
         updateUserDto.mot_de_passe.trim() !== ''
@@ -213,18 +235,21 @@ export class UsersService {
         delete updateUserDto.mot_de_passe;
       }
 
-      // 4. MISE À JOUR FINALE
-      return await this.prisma.utilisateurs.update({
+      // 4. Mise à jour finale (incluant le champ photo_profil_url s'il est dans le DTO)
+      const updatedUser = await this.prisma.utilisateurs.update({
         where: { id: id },
-        data: {
-          ...updateUserDto,
-          email: updateUserDto.email?.trim().toLowerCase(),
-        },
+        data: updateUserDto, // Contient nom, prenom, email, photo_profil_url, etc.
       });
+
+      // On retourne l'utilisateur ET le statut pour aider Flutter à décider quoi afficher
+      return {
+        user: updatedUser,
+        status: status,
+      };
     } catch (error) {
       if (error instanceof ConflictException) throw error;
       console.error('Erreur technique update:', error);
-      throw new Error('Impossible de mettre à jour votre profil.');
+      throw new Error('Erreur de mise à jour');
     }
   }
   async remove(id: string) {
