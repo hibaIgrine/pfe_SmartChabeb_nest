@@ -110,9 +110,13 @@ export class UsersController {
 
   @Get()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles('ADMIN')
-  findAll() {
-    return this.usersService.findAll();
+  // 🛡️ On autorise l'Admin ET le Coach (et le Gestionnaire si besoin)
+  @Roles('ADMIN', 'COACH', 'GESTIONNAIRE')
+  findAll(@Request() req: any) {
+    // Le service fera ensuite le tri :
+    // - L'admin recevra TOUT.
+    // - Le coach recevra uniquement SES élèves.
+    return this.usersService.findAll(req.user.userId, req.user.role);
   }
 
   @Patch(':id/role')

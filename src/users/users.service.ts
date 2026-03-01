@@ -120,19 +120,49 @@ export class UsersService {
 
   // src/users/users.service.ts
 
-  async findAll() {
-    return await this.prisma.utilisateurs.findMany({
-      include: {
-        salles: { select: { nom: true, gouvernorat: true } }, // Voir le centre de rattachement
-        _count: {
-          select: {
-            journal_repas: true,
-            programmes_sportifs_programmes_sportifs_id_membreToutilisateurs: true,
+  // On ajoute les paramètres optionnels pour identifier celui qui fait la requête
+  async findAll(requesterId?: string, requesterRole?: string) {
+    try {
+      // 🛡️ CAS DU COACH : Il ne voit que les ADHÉRENTS de sa PROPRE salle
+      if (requesterRole === 'COACH' && requesterId) {
+        const coach = await this.prisma.utilisateurs.findUnique({
+          where: { id: requesterId },
+          select: { id_salle: true },
+        });
+
+        if (!coach || !coach.id_salle) return []; // Si le coach n'a pas de salle, liste vide
+
+        return await this.prisma.utilisateurs.findMany({
+          where: {
+            id_salle: coach.id_salle,
+            role: 'ADHERENT', // Un coach ne gère que les jeunes
           },
+          include: {
+            salles: { select: { nom: true, gouvernorat: true } },
+            suivi_biometrique: { orderBy: { date_mesure: 'desc' }, take: 1 },
+          },
+          orderBy: { nom: 'asc' },
+        });
+      }
+
+      // 🛡️ CAS DE L'ADMIN : Il voit TOUT le monde (Staff + Adhérents)
+      return await this.prisma.utilisateurs.findMany({
+        include: {
+          salles: { select: { nom: true, gouvernorat: true } },
+          _count: {
+            select: {
+              journal_repas: true,
+              programmes_sportifs_programmes_sportifs_id_membreToutilisateurs: true,
+            },
+          },
+          suivi_biometrique: { orderBy: { date_mesure: 'desc' }, take: 1 },
         },
-      },
-      orderBy: { nom: 'asc' },
-    });
+        orderBy: { nom: 'asc' },
+      });
+    } catch (error) {
+      console.error('Erreur findAll Users:', error);
+      return [];
+    }
   }
 
   // 1. Fonction GÉNERIQUE par ID (Pour l'Admin Web)
@@ -276,6 +306,29 @@ export class UsersService {
     return await this.prisma.utilisateurs.update({
       where: { email: email },
       data: { id_salle: id_salle },
+    });
+  }
+  async findMembersByCoachSalle(coachId: string) {
+    // 1. On cherche le coach
+    const coach = await this.prisma.utilisateurs.findUnique({
+      where: { id: coachId },
+      select: { id_salle: true },
+    });
+
+    // 🛡️ SÉCURITÉ : On vérifie si 'coach' existe
+    if (!coach) {
+      throw new UnauthorizedException('Coach non trouvé ou non autorisé.');
+    }
+
+    // 2. Maintenant TypeScript sait que coach n'est pas null
+    return await this.prisma.utilisateurs.findMany({
+      where: {
+        id_salle: coach.id_salle,
+        role: 'ADHERENT',
+      },
+      include: {
+        suivi_biometrique: { orderBy: { date_mesure: 'desc' }, take: 1 },
+      },
     });
   }
 }
