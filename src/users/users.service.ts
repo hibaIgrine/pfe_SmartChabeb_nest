@@ -195,9 +195,23 @@ export class UsersService {
     });
   }
 
+  // src/users/users.service.ts
+
+  // src/users/users.service.ts
+
+  // src/users/users.service.ts
+
   async findOne(id: string) {
     return await this.prisma.utilisateurs.findUnique({
-      where: { id: id },
+      where: { id },
+      include: {
+        salles: true,
+        suivi_biometrique: { orderBy: { date_mesure: 'desc' }, take: 1 },
+        programmes_sportifs_programmes_sportifs_id_membreToutilisateurs: {
+          // 🏆 TRI DOUBLE : Date puis ID pour être infaillible
+          orderBy: [{ date_creation: 'desc' }, { id: 'desc' }],
+        },
+      },
     });
   }
   // REMPLACE TA MÉTHODE PAR CELLE-CI (Version Excellence 🏆)

@@ -152,9 +152,11 @@ export class UsersController {
     return await this.usersService.updateStatus(id, { id_salle });
   }
 
+  // src/users/users.controller.ts
+
   @Get(':id')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'COACH') // 👈 Ajoute COACH ici
   findOne(@Param('id') id: string) {
     return this.usersService.findOne(id);
   }

@@ -167,6 +167,7 @@ model programmes_sportifs {
   titre_programme                                          String?       @db.VarChar(100)
   details_exercices                                        Json?
   cree_par_ia                                              Boolean?
+  date_creation                                            DateTime      @default(now()) @db.Timestamp(6) 
   utilisateurs_programmes_sportifs_id_coachToutilisateurs  utilisateurs? @relation("programmes_sportifs_id_coachToutilisateurs", fields: [id_coach], references: [id], onDelete: NoAction, onUpdate: NoAction)
   utilisateurs_programmes_sportifs_id_membreToutilisateurs utilisateurs? @relation("programmes_sportifs_id_membreToutilisateurs", fields: [id_membre], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
