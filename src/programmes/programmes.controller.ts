@@ -17,15 +17,17 @@ import { AuthGuard } from '@nestjs/passport';
 @Controller('programmes')
 export class ProgrammesController {
   constructor(private readonly programmesService: ProgrammesService) {}
-  @UseGuards(AuthGuard('jwt'))
+
+  @Post() // Utilisé par le coach
+  create(@Body() body: any) {
+    return this.programmesService.create(body);
+  }
+
+  @UseGuards(AuthGuard('jwt')) // Utilisé par l'adhérent
   @Get('my-program')
   async getMyProgram(@Request() req: any) {
     // req.user.userId vient du Token JWT
     return await this.programmesService.findMyProgram(req.user.userId);
-  }
-  @Post()
-  create(@Body() createProgrammeDto: CreateProgrammeDto) {
-    return this.programmesService.create(createProgrammeDto);
   }
 
   @Get()

@@ -19,14 +19,18 @@ export class ProgrammesService {
     return programs;
   }
 
-
-
-
-
-  create(createProgrammeDto: CreateProgrammeDto) {
-    return 'This action adds a new programme';
+  async create(data: any) {
+    return await this.prisma.programmes_sportifs.create({
+      data: {
+        id_membre: data.id_membre,
+        id_coach: data.id_coach,
+        titre_programme: data.titre_programme,
+        details_exercices: data.details_exercices, // Ton tableau d'exercices JSON
+        cree_par_ia: false,
+      },
+    });
   }
-  
+
   findAll() {
     return `This action returns all programmes`;
   }
