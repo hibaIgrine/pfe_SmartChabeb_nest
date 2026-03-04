@@ -40,17 +40,50 @@ export class ClubsService {
       },
     });
   }
-  async findAll() {
+  // src/clubs/clubs.service.ts
+
+  async findAll(salleId?: string) {
     return await this.prisma.clubs.findMany({
+      where: salleId ? { id_salle: salleId } : {},
       include: {
-        salles: { select: { nom: true, gouvernorat: true } },
+        // 1. On récupère les infos du coach
         coach: { select: { nom: true, prenom: true } },
-        _count: { select: { inscriptions: true } },
+        // 2. On récupère le nom du centre
+        salles: { select: { nom: true } },
+        // 3. LA MAGIE : On demande le compte des inscriptions
+        _count: {
+          select: {
+            inscriptions: true, // Vérifie si dans ton schema c'est 'inscriptions' ou 'inscriptions_clubs'
+          },
+        },
       },
       orderBy: { nom: 'asc' },
     });
   }
+  // Rejoindre un club
+  async joinClub(userId: string, clubId: string) {
+    try {
+      return await this.prisma.inscriptions_clubs.create({
+        data: {
+          id_utilisateur: userId,
+          id_club: clubId,
+        },
+      });
+    } catch (error) {
+      if (error.code === 'P2002') {
+        throw new ConflictException('Tu es déjà membre de ce club !');
+      }
+      throw error;
+    }
+  }
 
+  // Voir mes inscriptions (pour le mobile)
+  async findMyClubs(userId: string) {
+    return await this.prisma.inscriptions_clubs.findMany({
+      where: { id_utilisateur: userId },
+      include: { club: true },
+    });
+  }
   findOne(id: number) {
     return `This action returns a #${id} club`;
   }
