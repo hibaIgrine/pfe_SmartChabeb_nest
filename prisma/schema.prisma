@@ -7,9 +7,42 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// --- NOUVEAU : GESTION DES CLUBS ---
+
+model clubs {
+  id              String               @id @default(uuid()) @db.Uuid
+  nom             String               @db.VarChar(100)
+  description     String?              @db.Text
+  categorie       String               @db.VarChar(50) // Ex: Art, Technologie, Musique, Robotique
+  logo_url        String?              @db.VarChar(255)
+  planning        Json?                // Stocke les horaires (Ex: {"Lundi": "14h-16h"})
+  
+  id_salle        String               @db.Uuid
+  salles          salles               @relation(fields: [id_salle], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  
+  id_coach        String?              @db.Uuid // L'animateur du club
+  coach           utilisateurs?        @relation("coach_club", fields: [id_coach], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  inscriptions    inscriptions_clubs[]
+}
+
+model inscriptions_clubs {
+  id              String       @id @default(uuid()) @db.Uuid
+  id_utilisateur  String       @db.Uuid
+  id_club         String       @db.Uuid
+  date_adhesion   DateTime     @default(now()) @db.Timestamp(6)
+  
+  utilisateur     utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  club            clubs        @relation(fields: [id_club], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([id_utilisateur, id_club]) // Un jeune ne s'inscrit qu'une fois par club
+}
+
+// --- MODÈLES EXISTANTS CORRIGÉS ET LIÉS ---
+
 model abonnements_membres {
   id                   String                @id @default(uuid()) @db.Uuid
-  id_utilisateur       String?               @db.Uuid // Ajouté pour corriger l'erreur
+  id_utilisateur       String?               @db.Uuid
   id_forfait           String?               @db.Uuid
   id_paiement          String?               @db.Uuid
   date_debut           DateTime?             @db.Date
@@ -167,7 +200,7 @@ model programmes_sportifs {
   titre_programme                                          String?       @db.VarChar(100)
   details_exercices                                        Json?
   cree_par_ia                                              Boolean?
-  date_creation                                            DateTime      @default(now()) @db.Timestamp(6) 
+  date_creation                                            DateTime      @default(now()) @db.Timestamp(6)
   utilisateurs_programmes_sportifs_id_coachToutilisateurs  utilisateurs? @relation("programmes_sportifs_id_coachToutilisateurs", fields: [id_coach], references: [id], onDelete: NoAction, onUpdate: NoAction)
   utilisateurs_programmes_sportifs_id_membreToutilisateurs utilisateurs? @relation("programmes_sportifs_id_membreToutilisateurs", fields: [id_membre], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
@@ -209,6 +242,7 @@ model salles {
   equipements     equipements[]
   produits        produits[]
   utilisateurs    utilisateurs[]
+  clubs           clubs[]        // Ajouté pour le module Club
 }
 
 model suivi_biometrique {
@@ -253,4 +287,8 @@ model utilisateurs {
   reclamations                                                    reclamations[]
   suivi_biometrique                                               suivi_biometrique[]
   salles                                                          salles?                 @relation(fields: [id_salle], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  
+  // Ajouté pour le module Club
+  clubs_diriges                                                  clubs[]                 @relation("coach_club")
+  inscriptions_clubs                                             inscriptions_clubs[]
 }

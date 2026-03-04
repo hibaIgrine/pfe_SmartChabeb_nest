@@ -9,6 +9,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ForfaitsModule } from './forfaits/forfaits.module';
 import { SallesModule } from './salles/salles.module';
 import { ProgrammesModule } from './programmes/programmes.module';
+import { ClubsModule } from './clubs/clubs.module';
 
 @Module({
   imports: [
@@ -38,6 +39,8 @@ import { ProgrammesModule } from './programmes/programmes.module';
     SallesModule,
 
     ProgrammesModule,
+
+    ClubsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
