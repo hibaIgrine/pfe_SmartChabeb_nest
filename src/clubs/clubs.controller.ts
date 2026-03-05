@@ -12,17 +12,18 @@ export class ClubsController {
 
   @Get() // Utilisé par le Web (tout) et le Mobile (filtré)
   findAll(@Query('id_salle') id_salle?: string) {
+    console.log('📡 [ClubsController] GET /clubs called with id_salle:', id_salle);
     return this.clubsService.findAll(id_salle);
   }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.clubsService.findOne(+id);
+    return this.clubsService.findOne(id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateClubDto: UpdateClubDto) {
-    return this.clubsService.update(+id, updateClubDto);
+  update(@Param('id') id: string, @Body() body: any) {
+    return this.clubsService.update(id, body);
   }
 
   @Delete(':id')

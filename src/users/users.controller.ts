@@ -99,8 +99,7 @@ export class UsersController {
   ) {
     // Si un fichier est uploadé, on génère l'URL pour la base de données
     if (file) {
-      // Remplace l'IP par celle de ton PC (192.168.1.18)
-      updateUserDto.photo_profil_url = `http://192.168.1.17:3000/uploads/${file.filename}`;
+      updateUserDto.photo_profil_url = `/uploads/${file.filename}`;
     }
     // On appelle ton service "Excellence" (celui qui gère le NOT id: id)
     return await this.usersService.update(id, updateUserDto);

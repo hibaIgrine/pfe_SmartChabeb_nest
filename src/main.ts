@@ -4,10 +4,15 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
+import { json, urlencoded } from 'express';
 
 async function bootstrap() {
   // On précise <NestExpressApplication> pour accéder aux fonctions de fichiers statiques
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Pour accepter d'énormes formulaires (Base64 Logo Uploads) sans avoir une erreur "Payload Too Large (413)"
+  app.use(json({ limit: '50mb' }));
+  app.use(urlencoded({ extended: true, limit: '50mb' }));
 
   // 1. Configuration de Swagger
   const config = new DocumentBuilder()
