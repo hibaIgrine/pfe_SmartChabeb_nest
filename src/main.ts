@@ -34,9 +34,9 @@ async function bootstrap() {
 
   // 3. Rendre le dossier "uploads" public (Pour voir les photos de profil)
   // Assure-toi de créer un dossier nommé 'uploads' à la racine du projet (à côté de src)
- app.useStaticAssets(join(process.cwd(), 'uploads'), {
-   prefix: '/uploads/',
- });
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+    prefix: '/uploads/',
+  });
 
   app.enableCors();
 

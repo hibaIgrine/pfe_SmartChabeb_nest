@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards,Request, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+  Request,
+  Query,
+} from '@nestjs/common';
 import { ClubsService } from './clubs.service';
 import { CreateClubDto } from './dto/create-club.dto';
 import { UpdateClubDto } from './dto/update-club.dto';
@@ -12,7 +23,10 @@ export class ClubsController {
 
   @Get() // Utilisé par le Web (tout) et le Mobile (filtré)
   findAll(@Query('id_salle') id_salle?: string) {
-    console.log('📡 [ClubsController] GET /clubs called with id_salle:', id_salle);
+    console.log(
+      '📡 [ClubsController] GET /clubs called with id_salle:',
+      id_salle,
+    );
     return this.clubsService.findAll(id_salle);
   }
 

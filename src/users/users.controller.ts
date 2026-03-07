@@ -31,7 +31,7 @@ import { extname } from 'path';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  // --- ROUTES PUBLIQUES ---
+  // --- 1. ROUTES PUBLIQUES (INSCRIPTION & VALIDATION) ---
 
   @Post()
   create(@Body() createUserDto: CreateUserDto) {
@@ -67,7 +67,7 @@ export class UsersController {
     );
   }
 
-  // --- ROUTES PRIVÉES & ÉDITION PROFIL ---
+  // --- 2. ROUTES PRIVÉES (TOKEN REQUIS) ---
 
   @Get('me/profile')
   @UseGuards(AuthGuard('jwt'))
@@ -75,7 +75,7 @@ export class UsersController {
     return await this.usersService.getProfileWithBiometrics(req.user.userId);
   }
 
-  // CETTE ROUTE UNIQUE GÈRE TOUT : TEXTE + IMAGE GALERIE + AVATAR ASSET
+  // CETTE ROUTE UNIQUE GÈRE TOUT : MISE À JOUR + UPLOAD IMAGE
   @Patch(':id')
   @UseGuards(AuthGuard('jwt'))
   @UseInterceptors(
@@ -97,25 +97,27 @@ export class UsersController {
     @Body() updateUserDto: any,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    // Si un fichier est uploadé, on génère l'URL pour la base de données
     if (file) {
-      updateUserDto.photo_profil_url = `/uploads/${file.filename}`;
+      // ⚠️ METS À JOUR CETTE IP SI ELLE CHANGE DANS TA CONSTANTS.DART
+      updateUserDto.photo_profil_url = `http://192.168.1.17:3000/uploads/${file.filename}`;
     }
-    // On appelle ton service "Excellence" (celui qui gère le NOT id: id)
     return await this.usersService.update(id, updateUserDto);
   }
 
-  // --- ROUTES ADMINISTRATIVES ---
+  // --- 3. ROUTES ADMINISTRATIVES & COACHING ---
 
   @Get()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  // 🛡️ On autorise l'Admin ET le Coach (et le Gestionnaire si besoin)
   @Roles('ADMIN', 'COACH', 'GESTIONNAIRE')
   findAll(@Request() req: any) {
-    // Le service fera ensuite le tri :
-    // - L'admin recevra TOUT.
-    // - Le coach recevra uniquement SES élèves.
     return this.usersService.findAll(req.user.userId, req.user.role);
+  }
+
+  @Get(':id')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN', 'COACH')
+  findOne(@Param('id') id: string) {
+    return this.usersService.findOne(id);
   }
 
   @Patch(':id/role')
@@ -149,15 +151,6 @@ export class UsersController {
     @Body('id_salle') id_salle: string,
   ) {
     return await this.usersService.updateStatus(id, { id_salle });
-  }
-
-  // src/users/users.controller.ts
-
-  @Get(':id')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles('ADMIN', 'COACH') // 👈 Ajoute COACH ici
-  findOne(@Param('id') id: string) {
-    return this.usersService.findOne(id);
   }
 
   @Delete(':id')

@@ -17,6 +17,30 @@ export class LoginDto {
   mot_de_passe: string;
 }
 
+export class ForgotPasswordDto {
+  @ApiProperty({ example: 'hiba@test.com' })
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+}
+
+export class ResetPasswordDto {
+  @ApiProperty({ example: 'hiba@test.com' })
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @IsNotEmpty()
+  token: string;
+
+  @ApiProperty({ example: 'newpassword123' })
+  @IsString()
+  @IsNotEmpty()
+  newPassword: string;
+}
+
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
@@ -26,5 +50,19 @@ export class AuthController {
   async login(@Body() loginDto: LoginDto) {
     // On utilise les données validées du DTO
     return this.authService.login(loginDto.email, loginDto.mot_de_passe);
+  }
+
+  @Post('forgot-password')
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(forgotPasswordDto.email);
+  }
+
+  @Post('reset-password')
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    return this.authService.resetPassword(
+      resetPasswordDto.email,
+      resetPasswordDto.token,
+      resetPasswordDto.newPassword,
+    );
   }
 }

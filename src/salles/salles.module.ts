@@ -4,7 +4,7 @@ import { SallesController } from './salles.controller';
 import { PrismaModule } from 'src/prisma/prisma.module';
 
 @Module({
-  imports:[PrismaModule],
+  imports: [PrismaModule],
   controllers: [SallesController],
   providers: [SallesService],
 })

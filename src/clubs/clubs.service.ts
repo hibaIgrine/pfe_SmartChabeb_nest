@@ -26,7 +26,7 @@ export class ClubsService {
       const extension = matches[1].split('/')[1] || 'png';
       const imageBuffer = Buffer.from(matches[2], 'base64');
       const filename = `club-${Date.now()}-${Math.floor(Math.random() * 10000)}.${extension}`;
-      
+
       const uploadDir = path.join(process.cwd(), 'uploads');
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true });
@@ -37,13 +37,18 @@ export class ClubsService {
 
       return `/uploads/${filename}`;
     } catch (err) {
-      console.error('Erreur lors de la sauvegarde de l\'image Base64', err);
+      console.error("Erreur lors de la sauvegarde de l'image Base64", err);
       return ''; // En cas d'erreur on retourne vide pour ne pas crasher
     }
   }
 
   async create(data: any) {
-    console.log('🚀 Données reçues du Front: Nom=', data.nom, ' Categorie=', data.categorie); 
+    console.log(
+      '🚀 Données reçues du Front: Nom=',
+      data.nom,
+      ' Categorie=',
+      data.categorie,
+    );
 
     try {
       // 1. Sauvegarde du logo s'il est en base64
@@ -55,7 +60,10 @@ export class ClubsService {
       // 2. Formatage du planning en Objet JSON
       let finalPlanning: any = undefined;
       if (data.planning) {
-        finalPlanning = typeof data.planning === 'string' ? { texte: data.planning } : data.planning;
+        finalPlanning =
+          typeof data.planning === 'string'
+            ? { texte: data.planning }
+            : data.planning;
       }
 
       const nouveauClub = await this.prisma.clubs.create({
@@ -120,9 +128,14 @@ export class ClubsService {
       orderBy: { nom: 'asc' },
     });
 
-    const totalIns = clubs.reduce((acc, c) => acc + (c.inscriptions?.length || 0), 0);
-    console.log(`[ClubsService] findAll: ${clubs.length} clubs, ${totalIns} total inscriptions.`);
-    
+    const totalIns = clubs.reduce(
+      (acc, c) => acc + (c.inscriptions?.length || 0),
+      0,
+    );
+    console.log(
+      `[ClubsService] findAll: ${clubs.length} clubs, ${totalIns} total inscriptions.`,
+    );
+
     return clubs;
   }
   // Rejoindre un club

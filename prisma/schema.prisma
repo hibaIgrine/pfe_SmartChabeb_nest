@@ -7,38 +7,30 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// --- NOUVEAU : GESTION DES CLUBS ---
-
 model clubs {
-  id              String               @id @default(uuid()) @db.Uuid
-  nom             String               @db.VarChar(100)
-  description     String?              @db.Text
-  categorie       String               @db.VarChar(50) // Ex: Art, Technologie, Musique, Robotique
-  logo_url        String?              @db.VarChar(255)
-  planning        Json?                // Stocke les horaires (Ex: {"Lundi": "14h-16h"})
-  
-  id_salle        String               @db.Uuid
-  salles          salles               @relation(fields: [id_salle], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  
-  id_coach        String?              @db.Uuid // L'animateur du club
-  coach           utilisateurs?        @relation("coach_club", fields: [id_coach], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  inscriptions    inscriptions_clubs[]
+  id           String               @id @default(uuid()) @db.Uuid
+  nom          String               @db.VarChar(100)
+  description  String?
+  categorie    String               @db.VarChar(50)
+  logo_url     String?              @db.VarChar(255)
+  planning     Json?
+  id_salle     String               @db.Uuid
+  id_coach     String?              @db.Uuid
+  coach        utilisateurs?        @relation("coach_club", fields: [id_coach], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  salles       salles               @relation(fields: [id_salle], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  inscriptions inscriptions_clubs[]
 }
 
 model inscriptions_clubs {
-  id              String       @id @default(uuid()) @db.Uuid
-  id_utilisateur  String       @db.Uuid
-  id_club         String       @db.Uuid
-  date_adhesion   DateTime     @default(now()) @db.Timestamp(6)
-  
-  utilisateur     utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  club            clubs        @relation(fields: [id_club], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id             String       @id @default(uuid()) @db.Uuid
+  id_utilisateur String       @db.Uuid
+  id_club        String       @db.Uuid
+  date_adhesion  DateTime     @default(now()) @db.Timestamp(6)
+  club           clubs        @relation(fields: [id_club], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  utilisateur    utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@unique([id_utilisateur, id_club]) // Un jeune ne s'inscrit qu'une fois par club
+  @@unique([id_utilisateur, id_club])
 }
-
-// --- MODÈLES EXISTANTS CORRIGÉS ET LIÉS ---
 
 model abonnements_membres {
   id                   String                @id @default(uuid()) @db.Uuid
@@ -239,10 +231,10 @@ model salles {
   latitude        Float?
   longitude       Float?
   date_creation   DateTime?      @default(now()) @db.Date
+  clubs           clubs[]
   equipements     equipements[]
   produits        produits[]
   utilisateurs    utilisateurs[]
-  clubs           clubs[]        // Ajouté pour le module Club
 }
 
 model suivi_biometrique {
@@ -269,14 +261,18 @@ model utilisateurs {
   niveau_sportif                                                  String?                 @db.VarChar(100)
   photo_profil_url                                                String?                 @db.VarChar(255)
   compte_actif                                                    Boolean?                @default(true)
-  date_fin_ban                                                    DateTime?
-  motif_ban                                                       String?                 @db.VarChar(255)
   code_verification                                               String?                 @db.VarChar(6)
   est_verifie                                                     Boolean?                @default(false)
+  date_fin_ban                                                    DateTime?
+  motif_ban                                                       String?                 @db.VarChar(255)
+  reset_token                                                     String?                 @db.VarChar(6)
+  reset_token_expires                                             DateTime?
   abonnements_membres                                             abonnements_membres[]
   allergies                                                       allergies[]
   blessures                                                       blessures[]
+  clubs_diriges                                                   clubs[]                 @relation("coach_club")
   commandes                                                       commandes[]
+  inscriptions_clubs                                              inscriptions_clubs[]
   interactions_sociales                                           interactions_sociales[]
   journal_repas                                                   journal_repas[]
   paiements_historique                                            paiements_historique[]
@@ -287,8 +283,4 @@ model utilisateurs {
   reclamations                                                    reclamations[]
   suivi_biometrique                                               suivi_biometrique[]
   salles                                                          salles?                 @relation(fields: [id_salle], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  
-  // Ajouté pour le module Club
-  clubs_diriges                                                  clubs[]                 @relation("coach_club")
-  inscriptions_clubs                                             inscriptions_clubs[]
 }
