@@ -264,6 +264,7 @@ model utilisateurs {
   code_verification                                               String?                 @db.VarChar(6)
   est_verifie                                                     Boolean?                @default(false)
   date_fin_ban                                                    DateTime?
+  bio                                                             String?                 @db.Text  
   motif_ban                                                       String?                 @db.VarChar(255)
   reset_token                                                     String?                 @db.VarChar(6)
   reset_token_expires                                             DateTime?

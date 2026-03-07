@@ -60,50 +60,62 @@ export class UsersService {
 
   // --- 2. MISE À JOUR PROFIL (Gestion Changement Email) ---
   async update(id: string, updateUserDto: any) {
-    try {
-      const currentUser = await this.prisma.utilisateurs.findUnique({ where: { id } });
-      if (!currentUser) throw new UnauthorizedException('Utilisateur non trouvé');
+  try {
+    const currentUser = await this.prisma.utilisateurs.findUnique({ where: { id } });
+    if (!currentUser) throw new UnauthorizedException('Utilisateur non trouvé');
 
-      let status = 'PROFILE_UPDATED';
+    let status = 'PROFILE_UPDATED';
 
-      if (updateUserDto.email) {
-        const newEmail = updateUserDto.email.trim().toLowerCase();
-        if (newEmail !== currentUser.email.toLowerCase()) {
-          const exists = await this.prisma.utilisateurs.findFirst({
-            where: { email: newEmail, NOT: { id: id } }
-          });
-          if (exists) throw new ConflictException('Email déjà utilisé');
+    // 1. LOGIQUE CHANGEMENT EMAIL (OTP)
+    if (updateUserDto.email) {
+      const newEmail = updateUserDto.email.trim().toLowerCase();
+      if (newEmail !== currentUser.email.toLowerCase()) {
+        const exists = await this.prisma.utilisateurs.findFirst({
+          where: { email: newEmail, NOT: { id: id } }
+        });
+        if (exists) throw new ConflictException('Email déjà utilisé');
 
-          const vCode = Math.floor(1000 + Math.random() * 9000).toString();
-          updateUserDto.code_verification = vCode;
-          updateUserDto.est_verifie = false;
-          status = 'VERIFY_EMAIL';
+        const vCode = Math.floor(1000 + Math.random() * 9000).toString();
+        updateUserDto.code_verification = vCode;
+        updateUserDto.est_verifie = false;
+        status = 'VERIFY_EMAIL';
 
-          // Await l'envoi du mail pour être sur de voir l'erreur s'il y en a une
-          await this.mailerService.sendMail({
-            to: newEmail,
-            subject: 'SmartChabeb - Validation du nouvel email',
-            html: `<h3>Ton nouveau code de vérification : ${vCode}</h3>`,
-          }).catch(e => console.error("❌ Erreur mail de mise à jour:", e.message));
-        }
+        await this.mailerService.sendMail({
+          to: newEmail,
+          subject: 'SmartChabeb - Validation du nouvel email',
+          html: `<h3>Ton nouveau code de vérification : ${vCode}</h3>`,
+        }).catch(e => console.error("❌ Erreur mail de mise à jour:", e.message));
       }
+    }
 
-      if (updateUserDto.mot_de_passe) {
-        const salt = await bcrypt.genSalt();
-        updateUserDto.mot_de_passe = await bcrypt.hash(updateUserDto.mot_de_passe, salt);
-      } else {
-        delete updateUserDto.mot_de_passe;
-      }
+    // 2. SÉCURITÉ MOT DE PASSE
+    if (updateUserDto.mot_de_passe && updateUserDto.mot_de_passe.trim() !== "") {
+      const salt = await bcrypt.genSalt();
+      updateUserDto.mot_de_passe = await bcrypt.hash(updateUserDto.mot_de_passe, salt);
+    } else {
+      delete updateUserDto.mot_de_passe; // On ne touche pas au mot de passe s'il est vide
+    }
 
-      const updatedUser = await this.prisma.utilisateurs.update({
-        where: { id: id },
-        data: updateUserDto,
-      });
+    // 3. GESTION DE LA SUPPRESSION DE PHOTO (Liaison avec Flutter)
+    // Si Flutter envoie une chaîne vide "", on enregistre NULL dans PostgreSQL
+    if (updateUserDto.photo_profil_url === "") {
+      updateUserDto.photo_profil_url = null;
+    }
 
-      return { user: updatedUser, status };
-    } catch (error) { throw error; }
+    // 4. MISE À JOUR FINALE (Gère automatiquement le champ 'bio' s'il est présent dans le DTO)
+    const updatedUser = await this.prisma.utilisateurs.update({
+      where: { id: id },
+      data: updateUserDto,
+    });
+
+    return { user: updatedUser, status };
+  } catch (error) {
+    if (error instanceof ConflictException) throw error;
+    console.error('Erreur technique update:', error);
+    throw new Error('Erreur de mise à jour');
   }
-async updateRole(id: string, newRole: string) {
+}
+  async updateRole(id: string, newRole: string) {
 // Optionnel : Empêcher de changer son propre rôle pour ne pas s'auto-bloquer
 return await this.prisma.utilisateurs.update({
 where: { id },
