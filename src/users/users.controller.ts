@@ -121,12 +121,12 @@ export class UsersController {
   }
 
   @Patch(':id/role')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
   async changeRole(@Param('id') id: string, @Body() body: ChangeRoleDto) {
+    // 👈 Utilise bien le DTO ici
     return await this.usersService.updateStatus(id, { role: body.role });
   }
-
   @Patch(':id/status')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')

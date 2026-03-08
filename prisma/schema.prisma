@@ -7,6 +7,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model roles {
+  id           String         @id @default(uuid()) @db.Uuid
+  nom          String         @unique @db.VarChar(50) // ex: "COACH", "ANIMATEUR"
+  description  String?        @db.Text
+  utilisateurs utilisateurs[] // Relation : un rôle peut avoir plusieurs utilisateurs
+}
+
 model clubs {
   id           String               @id @default(uuid()) @db.Uuid
   nom          String               @db.VarChar(100)
@@ -281,6 +288,8 @@ model utilisateurs {
   programmes_sportifs_programmes_sportifs_id_coachToutilisateurs  programmes_sportifs[]   @relation("programmes_sportifs_id_coachToutilisateurs")
   programmes_sportifs_programmes_sportifs_id_membreToutilisateurs programmes_sportifs[]   @relation("programmes_sportifs_id_membreToutilisateurs")
   publications                                                    publications[]
+  id_role                                                         String?                 @db.Uuid
+  role_obj                                                        roles?                  @relation(fields: [id_role], references: [id])
   reclamations                                                    reclamations[]
   suivi_biometrique                                               suivi_biometrique[]
   salles                                                          salles?                 @relation(fields: [id_salle], references: [id], onDelete: NoAction, onUpdate: NoAction)

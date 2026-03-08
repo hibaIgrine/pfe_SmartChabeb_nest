@@ -1,15 +1,9 @@
-import { IsString, IsEnum } from 'class-validator';
+import { IsString, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class ChangeRoleDto {
-  @ApiProperty({
-    example: 'COACH',
-    enum: ['ADHERENT', 'COACH', 'ADMIN', 'GESTIONNAIRE'],
-    description: 'Le nouveau rôle à attribuer',
-  })
+  @ApiProperty({ example: 'COACH' })
   @IsString()
-  @IsEnum(['ADHERENT', 'COACH', 'ADMIN', 'GESTIONNAIRE'], {
-    message: 'Le rôle doit être : ADHERENT, COACH, ADMIN ou GESTIONNAIRE',
-  })
-  role: string;
+  @IsNotEmpty()
+  role: string; // 🏆 Ici, on ne met PAS de @IsEnum pour que ça ne bloque plus jamais
 }

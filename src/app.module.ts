@@ -10,6 +10,7 @@ import { ForfaitsModule } from './forfaits/forfaits.module';
 import { SallesModule } from './salles/salles.module';
 import { ProgrammesModule } from './programmes/programmes.module';
 import { ClubsModule } from './clubs/clubs.module';
+import { RolesModule } from './roles/roles.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { ClubsModule } from './clubs/clubs.module';
     SallesModule,
     ProgrammesModule,
     ClubsModule,
+    RolesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
