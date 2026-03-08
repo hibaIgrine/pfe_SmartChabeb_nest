@@ -174,34 +174,56 @@ export class UsersService {
   }
 
   async findAll(requesterId?: string, requesterRole?: string) {
-    if (requesterRole === 'COACH' && requesterId) {
-      const coach = await this.prisma.utilisateurs.findUnique({
-        where: { id: requesterId },
-        select: { id_salle: true },
-      });
-      if (!coach || !coach.id_salle) return [];
+    try {
+      // 🛡️ CAS DU COACH : Filtrage par salle + Inclusion des Clubs
+      if (requesterRole === 'COACH' && requesterId) {
+        const coach = await this.prisma.utilisateurs.findUnique({
+          where: { id: requesterId },
+          select: { id_salle: true },
+        });
+
+        if (!coach || !coach.id_salle) return [];
+
+        return await this.prisma.utilisateurs.findMany({
+          where: {
+            id_salle: coach.id_salle,
+            role: 'ADHERENT',
+          },
+          include: {
+            salles: true,
+            suivi_biometrique: { orderBy: { date_mesure: 'desc' }, take: 1 },
+            // 🏆 AJOUT : On récupère les clubs du jeune
+            inscriptions_clubs: {
+              include: { club: true },
+            },
+          },
+          orderBy: { nom: 'asc' },
+        });
+      }
+
+      // 🛡️ CAS DE L'ADMIN : Vue globale + Inclusion des Clubs
       return await this.prisma.utilisateurs.findMany({
-        where: { id_salle: coach.id_salle, role: 'ADHERENT' },
         include: {
-          salles: true,
+          salles: { select: { id: true, nom: true, gouvernorat: true } },
+          _count: {
+            select: {
+              journal_repas: true,
+              programmes_sportifs_programmes_sportifs_id_membreToutilisateurs: true,
+              inscriptions_clubs: true, // Compte des clubs
+            },
+          },
           suivi_biometrique: { orderBy: { date_mesure: 'desc' }, take: 1 },
+          // 🏆 AJOUT : On récupère les clubs pour le filtrage Front
+          inscriptions_clubs: {
+            include: { club: true },
+          },
         },
         orderBy: { nom: 'asc' },
       });
+    } catch (error) {
+      console.error('Erreur findAll Users:', error);
+      return [];
     }
-    return await this.prisma.utilisateurs.findMany({
-      include: {
-        salles: { select: { nom: true, gouvernorat: true } },
-        _count: {
-          select: {
-            journal_repas: true,
-            programmes_sportifs_programmes_sportifs_id_membreToutilisateurs: true,
-          },
-        },
-        suivi_biometrique: { orderBy: { date_mesure: 'desc' }, take: 1 },
-      },
-      orderBy: { nom: 'asc' },
-    });
   }
 
   async updateStatus(id: string, data: any) {
