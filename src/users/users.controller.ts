@@ -74,7 +74,12 @@ export class UsersController {
   async getMyProfile(@Request() req: any) {
     return await this.usersService.getProfileWithBiometrics(req.user.userId);
   }
-
+  // Ajouter dans users.controller.ts
+  @Get('staff/:id_salle')
+  @UseGuards(AuthGuard('jwt'))
+  async getStaffBySalle(@Param('id_salle') id_salle: string) {
+    return await this.usersService.findStaffBySalle(id_salle);
+  }
   // CETTE ROUTE UNIQUE GÈRE TOUT : MISE À JOUR + UPLOAD IMAGE
   @Patch(':id')
   @UseGuards(AuthGuard('jwt'))
@@ -99,7 +104,7 @@ export class UsersController {
   ) {
     if (file) {
       // ⚠️ METS À JOUR CETTE IP SI ELLE CHANGE DANS TA CONSTANTS.DART
-      updateUserDto.photo_profil_url = `http://192.168.1.17:3000/uploads/${file.filename}`;
+      updateUserDto.photo_profil_url = `${process.env.API_URL}/uploads/${file.filename}`;
     }
     return await this.usersService.update(id, updateUserDto);
   }

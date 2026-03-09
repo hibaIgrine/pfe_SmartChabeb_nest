@@ -22,8 +22,18 @@ export class AuthService {
     if (!user) throw new UnauthorizedException("Utilisateur inconnu");
 
     const maintenant = new Date();
-    if (user.compte_actif === false && user.date_fin_ban && user.date_fin_ban > maintenant) {
-      throw new ForbiddenException(`Compte suspendu jusqu'au ${user.date_fin_ban.toLocaleDateString()}. Motif: ${user.motif_ban}`);
+    if (user.compte_actif === false && user.date_fin_ban) {
+      if (user.date_fin_ban > maintenant) {
+        throw new ForbiddenException(
+          `Compte suspendu jusqu'au ${user.date_fin_ban.toLocaleDateString()}. Motif: ${user.motif_ban}`,
+        );
+      } else {
+        // Auto-Unban lors du login
+        await this.prisma.utilisateurs.update({
+          where: { id: user.id },
+          data: { compte_actif: true, date_fin_ban: null, motif_ban: null },
+        });
+      }
     }
 
     const isMatch = await bcrypt.compare(pass, user.mot_de_passe);

@@ -43,50 +43,45 @@ export class ClubsService {
   }
 
   async create(data: any) {
-    console.log(
-      '🚀 Données reçues du Front: Nom=',
-      data.nom,
-      ' Categorie=',
-      data.categorie,
-    );
-
     try {
-      // 1. Sauvegarde du logo s'il est en base64
-      let finalLogoUrl: string | undefined = undefined;
-      if (data.logo_url) {
-        finalLogoUrl = this.saveBase64Image(data.logo_url);
-      }
+      // 1. Tes logiques existantes (Image, Planning)
+      let finalLogoUrl = data.logo_url
+        ? this.saveBase64Image(data.logo_url)
+        : undefined;
+      let finalPlanning =
+        typeof data.planning === 'string'
+          ? { texte: data.planning }
+          : data.planning;
 
-      // 2. Formatage du planning en Objet JSON
-      let finalPlanning: any = undefined;
-      if (data.planning) {
-        finalPlanning =
-          typeof data.planning === 'string'
-            ? { texte: data.planning }
-            : data.planning;
-      }
+      // 2. Création via transaction pour tout gérer
+      return await this.prisma.$transaction(async (tx) => {
+        const nouveauClub = await tx.clubs.create({
+          data: {
+            nom: data.nom,
+            description: data.description,
+            categorie: data.categorie,
+            id_salle: data.id_salle,
+            id_coach: data.id_coach || undefined, // Gardé pour ne pas casser l'existant
+            planning: finalPlanning,
+            logo_url: finalLogoUrl,
+            capacite: data.capacite ? parseInt(data.capacite) : null,
+            locale: data.locale,
+          },
+        });
 
-      const nouveauClub = await this.prisma.clubs.create({
-        data: {
-          nom: data.nom,
-          description: data.description,
-          categorie: data.categorie,
-          id_salle: data.id_salle,
-          id_coach: data.id_coach || undefined,
-          planning: finalPlanning,
-          logo_url: finalLogoUrl,
-        },
+        // 3. Ajout du staff si envoyé (Optionnel, ne casse rien si vide)
+        if (data.staff && Array.isArray(data.staff)) {
+          await tx.club_staff.createMany({
+            data: data.staff.map((s: any) => ({
+              id_club: nouveauClub.id,
+              id_utilisateur: s.id_utilisateur,
+              role_dans_club: s.role_dans_club,
+            })),
+          });
+        }
+        return nouveauClub;
       });
-
-      console.log('✅ Club enregistré en BDD avec ID:', nouveauClub.id);
-      return nouveauClub; // On renvoie l'objet créé pour confirmer au front
     } catch (error) {
-      console.error('❌ ERREUR PRISMA LORS DU CREATE:');
-      console.error(error);
-      if (error instanceof Error) {
-        console.error('Message:', error.message);
-        console.error('Stack:', error.stack);
-      }
       throw error;
     }
   }
@@ -170,7 +165,12 @@ export class ClubsService {
       include: {
         salles: { select: { nom: true } },
         coach: { select: { nom: true, prenom: true } },
-        // 🏆 ON RÉCUPÈRE LES MEMBRES RÉELS
+        staff: {
+          // 🆕 Ajouté sans supprimer tes relations existantes
+          include: {
+            utilisateur: { select: { id: true, nom: true, prenom: true } },
+          },
+        },
         inscriptions: {
           include: {
             utilisateur: {
@@ -214,5 +214,30 @@ export class ClubsService {
 
   async remove(id: string) {
     return await this.prisma.clubs.delete({ where: { id } });
+  }
+  async getStaffBySalle(id_salle: string) {
+    return await this.prisma.utilisateurs.findMany({
+      where: {
+        id_salle: id_salle,
+        role: { in: ['COACH', 'ANIMATEUR', 'RESPONSABLE_CLUB'] }, // Rôles autorisés
+      },
+      select: { id: true, nom: true, prenom: true, role: true },
+    });
+  }
+  async assignStaff(
+    id_club: string,
+    staffList: { id_utilisateur: string; role: string }[],
+  ) {
+    // Supprimer l'ancien staff pour éviter les conflits
+    await this.prisma.club_staff.deleteMany({ where: { id_club } });
+
+    // Créer le nouveau staff
+    return await this.prisma.club_staff.createMany({
+      data: staffList.map((item) => ({
+        id_club,
+        id_utilisateur: item.id_utilisateur,
+        role_dans_club: item.role,
+      })),
+    });
   }
 }

@@ -289,4 +289,20 @@ export class UsersService {
   async remove(id: string) {
     return await this.prisma.utilisateurs.delete({ where: { id } });
   }
+  // Ajouter dans users.service.ts
+  async findStaffBySalle(id_salle: string) {
+    return await this.prisma.utilisateurs.findMany({
+      where: {
+        id_salle: id_salle,
+        // Filtre uniquement les membres du staff
+        role: { in: ['COACH', 'ANIMATEUR', 'RESPONSABLE_CLUB'] },
+      },
+      select: {
+        id: true,
+        nom: true,
+        prenom: true,
+        role: true,
+      },
+    });
+  }
 }

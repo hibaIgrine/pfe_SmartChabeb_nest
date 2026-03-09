@@ -6,14 +6,17 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-
+import { ConfigService } from '@nestjs/config';
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    private configService: ConfigService,
+  ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: 'MA_CLE_SECRETTE_TRES_LONGUE', // La même que dans auth.module.ts
+      secretOrKey: configService.get<string>('JWT_SECRET') as string, // La même que dans auth.module.ts
     });
   }
 
@@ -21,11 +24,27 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { id: payload.sub },
     });
+
     if (!user) throw new UnauthorizedException();
-    if (user.compte_actif === false) {
-      throw new ForbiddenException(`Accès suspendu. Motif : ${user.motif_ban}`);
+
+    // VRAIE LOGIQUE DE BAN
+    if (user.compte_actif === false && user.date_fin_ban) {
+      const maintenant = new Date();
+
+      if (user.date_fin_ban > maintenant) {
+        // Le ban est toujours actif
+        throw new ForbiddenException(
+          `Accès suspendu jusqu'au ${user.date_fin_ban.toLocaleDateString()}. Motif : ${user.motif_ban}`,
+        );
+      } else {
+        // Le ban est expiré ! On réactive le compte automatiquement (Auto-Unban)
+        await this.prisma.utilisateurs.update({
+          where: { id: user.id },
+          data: { compte_actif: true, date_fin_ban: null, motif_ban: null },
+        });
+      }
     }
-    // Ce que le token contient (id, email, role) sera disponible dans 'req.user'
+
     return { userId: payload.sub, email: payload.email, role: payload.role };
   }
 }
