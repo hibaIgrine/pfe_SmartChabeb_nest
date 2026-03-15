@@ -46,16 +46,20 @@ model club_staff {
 }
 
 model inscriptions_clubs {
-  id             String       @id @default(uuid()) @db.Uuid
-  id_utilisateur String       @db.Uuid
-  id_club        String       @db.Uuid
-  date_adhesion  DateTime     @default(now()) @db.Timestamp(6)
-  club           clubs        @relation(fields: [id_club], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  utilisateur    utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id              String       @id @default(uuid()) @db.Uuid
+  id_utilisateur  String       @db.Uuid
+  id_club         String       @db.Uuid
+  statut          String       @default("EN_ATTENTE") // Valeurs : EN_ATTENTE, ACCEPTE, REFUSE, LISTE_ATTENTE
+  date_adhesion   DateTime     @default(now()) @db.Timestamp(6)
+  date_validation DateTime?    @db.Timestamp(6)
+  message         String?
+  responsable_id  String?      @db.Uuid // Ajout de @db.Uuid pour cohérence
+  
+  club            clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)
+  utilisateur     utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 
   @@unique([id_utilisateur, id_club])
 }
-
 model abonnements_membres {
   id                   String                @id @default(uuid()) @db.Uuid
   id_utilisateur       String?               @db.Uuid

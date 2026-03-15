@@ -21,7 +21,19 @@ import { RolesGuard } from 'src/auth/roles.guard';
 export class ClubsController {
   constructor(private readonly clubsService: ClubsService) {}
 
-  @Get() // Utilisé par le Web (tout) et le Mobile (filtré)
+  // 💡 1. CETTE ROUTE DOIT ÊTRE EN PREMIER
+  // Elle est statique. Si elle est après ':id', NestJS croit que 'my-inscriptions' est un ID.
+  @Get('my-inscriptions')
+  @UseGuards(AuthGuard('jwt'))
+  async getMyInscriptions(@Request() req) {
+    if (!req.user || !req.user.userId) {
+      console.error('❌ Pas de userId trouvé dans la requête !');
+    }
+    return await this.clubsService.findMyClubs(req.user.userId);
+  }
+
+  // 💡 2. Les routes générales
+  @Get()
   findAll(@Query('id_salle') id_salle?: string) {
     console.log(
       '📡 [ClubsController] GET /clubs called with id_salle:',
@@ -30,6 +42,22 @@ export class ClubsController {
     return this.clubsService.findAll(id_salle);
   }
 
+  // 💡 3. Les routes avec paramètres spécifiques (comme 'inscription/...')
+  @Patch('inscription/:id/status')
+  @UseGuards(AuthGuard('jwt'))
+  async updateInscriptionStatus(
+    @Param('id') id: string,
+    @Body('statut') statut: string,
+    @Request() req: any,
+  ) {
+    return await this.clubsService.updateInscriptionStatus(
+      id,
+      statut,
+      req.user.userId,
+    );
+  }
+
+  // 💡 4. Les routes avec paramètres génériques ':id' TOUJOURS EN DERNIER
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.clubsService.findOne(id);
@@ -44,23 +72,17 @@ export class ClubsController {
   remove(@Param('id') id: string) {
     return this.clubsService.remove(id);
   }
-  @Post('join') // Action de l'adhérent
+
+  @Post(':id/apply')
   @UseGuards(AuthGuard('jwt'))
-  async join(@Request() req, @Body('id_club') clubId: string) {
-    return await this.clubsService.joinClub(req.user.userId, clubId);
+  async applyToClub(@Param('id') clubId: string, @Request() req: any) {
+    return await this.clubsService.applyToClub(req.user.userId, clubId);
   }
 
-  @Get('my-inscriptions')
-  @UseGuards(AuthGuard('jwt'))
-  async getMyInscriptions(@Request() req) {
-    return await this.clubsService.findMyClubs(req.user.userId);
-  }
   @Post()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')
   async create(@Body() body: any) {
-    // Supprime tout bloc try/catch ici, laisse NestJS gérer l'erreur
-    // pour qu'elle remonte jusqu'à React.
     return await this.clubsService.create(body);
   }
 }

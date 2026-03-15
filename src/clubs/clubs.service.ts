@@ -1,4 +1,4 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { CreateClubDto } from './dto/create-club.dto';
 import { UpdateClubDto } from './dto/update-club.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -134,28 +134,118 @@ export class ClubsService {
     return clubs;
   }
   // Rejoindre un club
-  async joinClub(userId: string, clubId: string) {
-    try {
-      return await this.prisma.inscriptions_clubs.create({
-        data: {
-          id_utilisateur: userId,
-          id_club: clubId,
+  // clubs.service.ts
+
+  async applyToClub(userId: string, clubId: string) {
+    return await this.prisma.$transaction(async (tx) => {
+      // 1. Récupérer le club et compter les membres déjà acceptés
+      const club = await tx.clubs.findUnique({
+        where: { id: clubId },
+        select: {
+          capacite: true,
+          _count: {
+            select: {
+              inscriptions: { where: { statut: 'ACCEPTE' } },
+            },
+          },
         },
       });
-    } catch (error) {
-      if (error.code === 'P2002') {
-        throw new ConflictException('Tu es déjà membre de ce club !');
+
+      if (!club) throw new Error('Club introuvable');
+
+      // 2. Déterminer le statut : INSCRIT si place dispo, sinon LISTE_ATTENTE
+      // Si capacite est null, on considère qu'il n'y a pas de limite
+      const isFull = club.capacite && club._count.inscriptions >= club.capacite;
+      const nouveauStatut = isFull ? 'LISTE_ATTENTE' : 'EN_ATTENTE';
+      // Note: Tu peux mettre "ACCEPTE" directement si tu veux inscription automatique
+
+      // 3. Créer l'inscription
+      try {
+        return await tx.inscriptions_clubs.create({
+          data: {
+            id_utilisateur: userId,
+            id_club: clubId,
+            statut: nouveauStatut,
+          },
+        });
+      } catch (e) {
+        throw new Error('Vous avez déjà une demande en cours pour ce club.');
       }
-      throw error;
+    });
+  }
+
+  async getClubInscriptions(clubId: string) {
+    return await this.prisma.inscriptions_clubs.findMany({
+      where: { id_club: clubId },
+      include: {
+        utilisateur: { select: { nom: true, prenom: true, email: true } },
+      },
+      orderBy: { date_adhesion: 'desc' },
+    });
+  }
+
+  async updateInscriptionStatus(
+    inscriptionId: string,
+    statut: string,
+    responsableId: string,
+  ) {
+    // 💡 1. Si le responsable essaie d'ACCEPTER, on vérifie la capacité d'abord !
+    if (statut === 'ACCEPTE') {
+      const inscription = await this.prisma.inscriptions_clubs.findUnique({
+        where: { id: inscriptionId },
+        include: {
+          club: {
+            include: {
+              _count: {
+                select: { inscriptions: { where: { statut: 'ACCEPTE' } } },
+              },
+            },
+          },
+        },
+      });
+
+      if (inscription && inscription.club.capacite) {
+        if (inscription.club._count.inscriptions >= inscription.club.capacite) {
+          throw new ConflictException(
+            'Impossible : La capacité maximale du club est atteinte.',
+          ); // 🛑 Bloque l'admin !
+        }
+      }
     }
+
+    // 2. Si tout est bon (ou si c'est un REFUS), on met à jour
+    return await this.prisma.inscriptions_clubs.update({
+      where: { id: inscriptionId },
+      data: {
+        statut: statut, // ACCEPTE, REFUSE
+        date_validation: new Date(),
+        responsable_id: responsableId,
+      },
+    });
   }
 
   // Voir mes inscriptions (pour le mobile)
   async findMyClubs(userId: string) {
-    return await this.prisma.inscriptions_clubs.findMany({
-      where: { id_utilisateur: userId },
-      include: { club: true },
-    });
+    try {
+      console.log('🔍 Recherche inscriptions pour utilisateur ID:', userId);
+
+      const inscriptions = await this.prisma.inscriptions_clubs.findMany({
+        where: { id_utilisateur: userId },
+        // 💡 On simplifie l'include pour éviter les erreurs de jointures complexes
+        include: {
+          club: {
+            select: { id: true, nom: true },
+          },
+        },
+      });
+
+      console.log(`✅ ${inscriptions.length} inscriptions trouvées.`);
+      return inscriptions;
+    } catch (error) {
+      // 💡 Cela va afficher l'erreur RÉELLE dans ton terminal noir (NestJS)
+      console.error('❌ ERREUR CRITIQUE findMyClubs:', error);
+      throw error;
+    }
   }
   // src/clubs/clubs.service.ts
 
