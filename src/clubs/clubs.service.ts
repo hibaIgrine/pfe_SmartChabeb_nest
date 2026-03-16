@@ -234,7 +234,27 @@ export class ClubsService {
       },
     });
   }
+  // src/clubs/clubs.service.ts
 
+  async leaveClub(userId: string, clubId: string) {
+    try {
+      // On utilise deleteMany car on n'a pas l'ID de l'inscription mais l'ID du club et de l'user
+      const suppression = await this.prisma.inscriptions_clubs.deleteMany({
+        where: {
+          id_utilisateur: userId,
+          id_club: clubId,
+        },
+      });
+
+      if (suppression.count === 0) {
+        throw new NotFoundException("Vous n'êtes pas inscrit à ce club.");
+      }
+
+      return { message: 'Vous avez quitté le club avec succès.' };
+    } catch (error) {
+      throw error;
+    }
+  }
   // Voir mes inscriptions (pour le mobile)
   async findMyClubs(userId: string) {
     try {

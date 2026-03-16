@@ -56,7 +56,13 @@ export class ClubsController {
       req.user.userId,
     );
   }
+  // src/clubs/clubs.controller.ts
 
+  @Delete(':id/leave')
+  @UseGuards(AuthGuard('jwt'))
+  async leaveClub(@Param('id') clubId: string, @Request() req: any) {
+    return await this.clubsService.leaveClub(req.user.userId, clubId);
+  }
   // 💡 4. Les routes avec paramètres génériques ':id' TOUJOURS EN DERNIER
   @Get(':id')
   findOne(@Param('id') id: string) {
