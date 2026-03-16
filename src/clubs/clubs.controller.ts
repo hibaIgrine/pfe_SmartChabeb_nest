@@ -56,6 +56,12 @@ export class ClubsController {
       req.user.userId,
     );
   }
+  // clubs.controller.ts
+  @Delete('inscription/:id')
+  @UseGuards(AuthGuard('jwt'))
+  async removeInscription(@Param('id') id: string) {
+    return await this.clubsService.removeInscription(id);
+  }
   // src/clubs/clubs.controller.ts
 
   @Delete(':id/leave')

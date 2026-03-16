@@ -234,6 +234,42 @@ export class ClubsService {
       },
     });
   }
+  // clubs.service.ts
+  async removeInscription(id: string) {
+    return await this.prisma.$transaction(async (tx) => {
+      // 1. Vérifier si elle existe vraiment
+      const currentIns = await tx.inscriptions_clubs.findUnique({
+        where: { id },
+      });
+
+      if (!currentIns) {
+        console.error('❌ Inscription non trouvée en BDD pour ID:', id);
+        throw new NotFoundException('Inscription introuvable');
+      }
+
+      // 2. Supprimer
+      await tx.inscriptions_clubs.delete({
+        where: { id },
+      });
+      console.log('✅ Inscription supprimée avec succès');
+
+      // 3. Promotion automatique
+      const nextInLine = await tx.inscriptions_clubs.findFirst({
+        where: { id_club: currentIns.id_club, statut: 'LISTE_ATTENTE' },
+        orderBy: { date_adhesion: 'asc' },
+      });
+
+      if (nextInLine) {
+        await tx.inscriptions_clubs.update({
+          where: { id: nextInLine.id },
+          data: { statut: 'EN_ATTENTE' },
+        });
+        console.log('🚀 Promotion effectuée pour:', nextInLine.id_utilisateur);
+      }
+
+      return { success: true };
+    });
+  }
   // src/clubs/clubs.service.ts
 
   async leaveClub(userId: string, clubId: string) {

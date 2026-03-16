@@ -9,9 +9,9 @@ datasource db {
 
 model roles {
   id           String         @id @default(uuid()) @db.Uuid
-  nom          String         @unique @db.VarChar(50) // ex: "COACH", "ANIMATEUR"
+  nom          String         @unique @db.VarChar(50)
   description  String?        @db.Text
-  utilisateurs utilisateurs[] // Relation : un rôle peut avoir plusieurs utilisateurs
+  utilisateurs utilisateurs[]
 }
 
 model clubs {
@@ -21,45 +21,42 @@ model clubs {
   categorie    String               @db.VarChar(50)
   logo_url     String?              @db.VarChar(255)
   planning     Json?
-  capacite     Int?                 // Capacité maximale du club
-  locale       String?              // Localisation spécifique (ex: Salle de sport, Atelier 1)
+  capacite     Int?
+  locale       String?
   id_coach     String?              @db.Uuid
   id_salle     String               @db.Uuid
   salles       salles               @relation(fields: [id_salle], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  coach        utilisateurs?        @relation("coach_club", fields: [id_coach], references: [id])
-  // Relation Many-to-Many avec les utilisateurs via une table de liaison
-  staff        club_staff[]         
-  
+  coach        utilisateurs?        @relation("coach_club", fields: [id_coach], references: [id], onDelete: SetNull)
+  staff        club_staff[]
   inscriptions inscriptions_clubs[]
 }
 
 model club_staff {
-  id              String       @id @default(uuid()) @db.Uuid
-  id_club         String       @db.Uuid
-  id_utilisateur  String       @db.Uuid
-  role_dans_club  String       @db.VarChar(50) // ex: "RESPONSABLE", "ANIMATEUR", "COACH"
-  
-  club            clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  utilisateur     utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  id             String       @id @default(uuid()) @db.Uuid
+  id_club        String       @db.Uuid
+  id_utilisateur String       @db.Uuid
+  role_dans_club String       @db.VarChar(50)
+  club           clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  utilisateur    utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
-  @@unique([id_club, id_utilisateur]) // Un utilisateur ne peut pas être ajouté 2 fois au même club
+  @@unique([id_club, id_utilisateur])
 }
 
 model inscriptions_clubs {
   id              String       @id @default(uuid()) @db.Uuid
   id_utilisateur  String       @db.Uuid
   id_club         String       @db.Uuid
-  statut          String       @default("EN_ATTENTE") // Valeurs : EN_ATTENTE, ACCEPTE, REFUSE, LISTE_ATTENTE
+  statut          String       @default("EN_ATTENTE")
   date_adhesion   DateTime     @default(now()) @db.Timestamp(6)
   date_validation DateTime?    @db.Timestamp(6)
   message         String?
-  responsable_id  String?      @db.Uuid // Ajout de @db.Uuid pour cohérence
-  
+  responsable_id  String?      @db.Uuid
   club            clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)
   utilisateur     utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 
   @@unique([id_utilisateur, id_club])
 }
+
 model abonnements_membres {
   id                   String                @id @default(uuid()) @db.Uuid
   id_utilisateur       String?               @db.Uuid
@@ -68,9 +65,9 @@ model abonnements_membres {
   date_debut           DateTime?             @db.Date
   date_fin             DateTime?             @db.Date
   etat_abonnement      String?               @db.VarChar(50)
-  forfaits             forfaits?             @relation(fields: [id_forfait], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  paiements_historique paiements_historique? @relation(fields: [id_paiement], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  utilisateurs         utilisateurs?         @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  forfaits             forfaits?             @relation(fields: [id_forfait], references: [id], onDelete: SetNull)
+  paiements_historique paiements_historique? @relation(fields: [id_paiement], references: [id], onDelete: SetNull)
+  utilisateurs         utilisateurs?         @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 }
 
 model allergies {
@@ -79,7 +76,7 @@ model allergies {
   nom_aliment     String?       @db.VarChar(100)
   niveau_severite String?       @db.VarChar(50)
   commentaire     String?
-  utilisateurs    utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  utilisateurs    utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 }
 
 model blessures {
@@ -88,7 +85,7 @@ model blessures {
   nom_blessure   String?       @db.VarChar(100)
   description    String?
   est_gueri      Boolean?      @default(false)
-  utilisateurs   utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  utilisateurs   utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 }
 
 model categories_produits {
@@ -105,8 +102,8 @@ model commandes {
   date_commande        DateTime?             @default(now()) @db.Timestamp(6)
   statut_commande      String?               @db.VarChar(50)
   montant_total        Decimal?              @db.Decimal(10, 2)
-  paiements_historique paiements_historique? @relation(fields: [id_paiement], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  utilisateurs         utilisateurs?         @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  paiements_historique paiements_historique? @relation(fields: [id_paiement], references: [id], onDelete: SetNull)
+  utilisateurs         utilisateurs?         @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
   ligne_commandes      ligne_commandes[]
 }
 
@@ -118,7 +115,7 @@ model equipements {
   code_qr_machine         String?        @unique @db.VarChar(255)
   etat_actuel             String?        @db.VarChar(50)
   date_dernier_reparation DateTime?      @db.Date
-  salles                  salles?        @relation(fields: [id_salle], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  salles                  salles?        @relation(fields: [id_salle], references: [id], onDelete: Cascade)
   exercices               exercices[]
   reclamations            reclamations[]
 }
@@ -129,7 +126,7 @@ model exercices {
   nom_exercice     String?      @db.VarChar(100)
   muscle_travaille String?      @db.VarChar(100)
   video_tuto_url   String?      @db.VarChar(255)
-  equipements      equipements? @relation(fields: [id_equipement], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  equipements      equipements? @relation(fields: [id_equipement], references: [id], onDelete: Cascade)
 }
 
 model forfaits {
@@ -148,8 +145,8 @@ model interactions_sociales {
   est_un_like      Boolean?
   text_commentaire String?
   partage          Boolean?
-  publications     publications? @relation(fields: [id_publication], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  utilisateurs     utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  publications     publications? @relation(fields: [id_publication], references: [id], onDelete: Cascade)
+  utilisateurs     utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 }
 
 model journal_repas {
@@ -163,7 +160,7 @@ model journal_repas {
   lipides             Decimal?      @db.Decimal(5, 2)
   analyse_complete_ia Json?
   date_repas          DateTime?     @default(dbgenerated("CURRENT_DATE")) @db.Date
-  utilisateurs        utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  utilisateurs        utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 }
 
 model ligne_commandes {
@@ -172,8 +169,8 @@ model ligne_commandes {
   id_commande   String?    @db.Uuid
   quantite      Int?
   prix_unitaire Decimal?   @db.Decimal(10, 2)
-  commandes     commandes? @relation(fields: [id_commande], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  produits      produits?  @relation(fields: [id_produit], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  commandes     commandes? @relation(fields: [id_commande], references: [id], onDelete: Cascade)
+  produits      produits?  @relation(fields: [id_produit], references: [id], onDelete: SetNull)
 }
 
 model paiements_historique {
@@ -186,7 +183,7 @@ model paiements_historique {
   moyen_paiement      String?               @db.VarChar(50)
   abonnements_membres abonnements_membres[]
   commandes           commandes[]
-  utilisateurs        utilisateurs?         @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  utilisateurs        utilisateurs?         @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 }
 
 model points_fidelite {
@@ -195,7 +192,7 @@ model points_fidelite {
   total_points_xp Int?          @default(0)
   niveau_actuel   Int?          @default(1)
   liste_badge     Json?
-  utilisateurs    utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  utilisateurs    utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 }
 
 model produits {
@@ -209,8 +206,8 @@ model produits {
   image_produit_url   String?              @db.VarChar(255)
   caracteristiques    Json?
   ligne_commandes     ligne_commandes[]
-  categories_produits categories_produits? @relation(fields: [id_categorie], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  salles              salles?              @relation(fields: [id_salle], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  categories_produits categories_produits? @relation(fields: [id_categorie], references: [id], onDelete: SetNull)
+  salles              salles?              @relation(fields: [id_salle], references: [id], onDelete: Cascade)
 }
 
 model programmes_sportifs {
@@ -221,8 +218,8 @@ model programmes_sportifs {
   details_exercices                                        Json?
   cree_par_ia                                              Boolean?
   date_creation                                            DateTime      @default(now()) @db.Timestamp(6)
-  utilisateurs_programmes_sportifs_id_coachToutilisateurs  utilisateurs? @relation("programmes_sportifs_id_coachToutilisateurs", fields: [id_coach], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  utilisateurs_programmes_sportifs_id_membreToutilisateurs utilisateurs? @relation("programmes_sportifs_id_membreToutilisateurs", fields: [id_membre], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  utilisateurs_programmes_sportifs_id_coachToutilisateurs  utilisateurs? @relation("programmes_sportifs_id_coachToutilisateurs", fields: [id_coach], references: [id], onDelete: SetNull)
+  utilisateurs_programmes_sportifs_id_membreToutilisateurs utilisateurs? @relation("programmes_sportifs_id_membreToutilisateurs", fields: [id_membre], references: [id], onDelete: Cascade)
 }
 
 model publications {
@@ -232,7 +229,7 @@ model publications {
   image_post_url        String?                 @db.VarChar(255)
   date_publication      DateTime?               @default(now()) @db.Timestamp(6)
   interactions_sociales interactions_sociales[]
-  utilisateurs          utilisateurs?           @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  utilisateurs          utilisateurs?           @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 }
 
 model reclamations {
@@ -244,8 +241,8 @@ model reclamations {
   priorite           String?       @db.VarChar(50)
   date_creation      DateTime?     @default(now()) @db.Timestamp(6)
   statut_reclamation String?       @db.VarChar(50)
-  equipements        equipements?  @relation(fields: [id_equipement], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  utilisateurs       utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  equipements        equipements?  @relation(fields: [id_equipement], references: [id], onDelete: Cascade)
+  utilisateurs       utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 }
 
 model salles {
@@ -272,7 +269,7 @@ model suivi_biometrique {
   taille_cm      Int?
   imc            Decimal?      @db.Decimal(5, 2)
   date_mesure    DateTime?     @default(now()) @db.Timestamp(6)
-  utilisateurs   utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  utilisateurs   utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 }
 
 model utilisateurs {
@@ -310,9 +307,9 @@ model utilisateurs {
   programmes_sportifs_programmes_sportifs_id_membreToutilisateurs programmes_sportifs[]   @relation("programmes_sportifs_id_membreToutilisateurs")
   publications                                                    publications[]
   id_role                                                         String?                 @db.Uuid
-  role_obj                                                        roles?                  @relation(fields: [id_role], references: [id])
+  role_obj                                                        roles?                  @relation(fields: [id_role], references: [id], onDelete: SetNull)
   reclamations                                                    reclamations[]
   suivi_biometrique                                               suivi_biometrique[]
   staff_dans_clubs                                                club_staff[]
-  salles                                                          salles?                 @relation(fields: [id_salle], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  salles                                                          salles?                 @relation(fields: [id_salle], references: [id], onDelete: SetNull)
 }
