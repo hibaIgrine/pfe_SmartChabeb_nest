@@ -138,38 +138,48 @@ export class ClubsService {
 
   async applyToClub(userId: string, clubId: string) {
     return await this.prisma.$transaction(async (tx) => {
-      // 1. Récupérer le club et compter les membres déjà acceptés
+      // 1. Récupérer le club et COMPTER uniquement ceux qui sont déjà 'ACCEPTE'
       const club = await tx.clubs.findUnique({
         where: { id: clubId },
         select: {
           capacite: true,
           _count: {
             select: {
-              inscriptions: { where: { statut: 'ACCEPTE' } },
+              inscriptions: {
+                where: { statut: 'ACCEPTE' }, // 💡 On ne compte que les vrais membres
+              },
             },
           },
         },
       });
 
-      if (!club) throw new Error('Club introuvable');
+      if (!club) throw new NotFoundException('Club introuvable');
 
-      // 2. Déterminer le statut : INSCRIT si place dispo, sinon LISTE_ATTENTE
-      // Si capacite est null, on considère qu'il n'y a pas de limite
-      const isFull = club.capacite && club._count.inscriptions >= club.capacite;
-      const nouveauStatut = isFull ? 'LISTE_ATTENTE' : 'EN_ATTENTE';
-      // Note: Tu peux mettre "ACCEPTE" directement si tu veux inscription automatique
+      // 2. Déterminer le statut automatiquement
+      let statutFinal = 'EN_ATTENTE'; // Statut par défaut pour le responsable
 
-      // 3. Créer l'inscription
+      // 💡 LOGIQUE DE CAPACITÉ :
+      // Si la capacité existe (pas null) et qu'elle est atteinte ou dépassée
+      if (club.capacite !== null && club._count.inscriptions >= club.capacite) {
+        statutFinal = 'LISTE_ATTENTE'; // 👈 On force l'enregistrement en LISTE_ATTENTE
+      }
+
+      // 3. Créer l'inscription avec le statut calculé
       try {
-        return await tx.inscriptions_clubs.create({
+        const nouvelleInscription = await tx.inscriptions_clubs.create({
           data: {
             id_utilisateur: userId,
             id_club: clubId,
-            statut: nouveauStatut,
+            statut: statutFinal,
           },
         });
+
+        console.log(`📥 Inscription créée : ${statutFinal}`);
+        return nouvelleInscription;
       } catch (e) {
-        throw new Error('Vous avez déjà une demande en cours pour ce club.');
+        throw new ConflictException(
+          'Vous avez déjà une demande en cours pour ce club.',
+        );
       }
     });
   }
@@ -189,9 +199,9 @@ export class ClubsService {
     statut: string,
     responsableId: string,
   ) {
-    // 💡 1. Si le responsable essaie d'ACCEPTER, on vérifie la capacité d'abord !
+    // 💡 Si le responsable veut ACCEPTER, on revérifie une dernière fois la capacité
     if (statut === 'ACCEPTE') {
-      const inscription = await this.prisma.inscriptions_clubs.findUnique({
+      const currentIns = await this.prisma.inscriptions_clubs.findUnique({
         where: { id: inscriptionId },
         include: {
           club: {
@@ -204,20 +214,21 @@ export class ClubsService {
         },
       });
 
-      if (inscription && inscription.club.capacite) {
-        if (inscription.club._count.inscriptions >= inscription.club.capacite) {
+      if (currentIns && currentIns.club.capacite !== null) {
+        if (currentIns.club._count.inscriptions >= currentIns.club.capacite) {
+          // 🛑 On renvoie une erreur Conflict (409) que ton React va attraper
           throw new ConflictException(
-            'Impossible : La capacité maximale du club est atteinte.',
-          ); // 🛑 Bloque l'admin !
+            "Capacité maximale atteinte. Impossible d'accepter plus de membres.",
+          );
         }
       }
     }
 
-    // 2. Si tout est bon (ou si c'est un REFUS), on met à jour
+    // Mise à jour normale (Acceptation ou Refus)
     return await this.prisma.inscriptions_clubs.update({
       where: { id: inscriptionId },
       data: {
-        statut: statut, // ACCEPTE, REFUSE
+        statut: statut,
         date_validation: new Date(),
         responsable_id: responsableId,
       },
