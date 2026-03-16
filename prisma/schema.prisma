@@ -49,6 +49,10 @@ model inscriptions_clubs {
   statut          String       @default("EN_ATTENTE")
   date_adhesion   DateTime     @default(now()) @db.Timestamp(6)
   date_validation DateTime?    @db.Timestamp(6)
+  est_suspendu    Boolean      @default(false) // 💡 Nouveau
+  date_fin_suspension DateTime?
+  motif_suspension    String?
+  role_interne    String?      @default("MEMBRE") // 💡 Nouveau (ex: DELEGUE)
   message         String?
   responsable_id  String?      @db.Uuid
   club            clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)

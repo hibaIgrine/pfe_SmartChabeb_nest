@@ -135,7 +135,29 @@ export class ClubsService {
   }
   // Rejoindre un club
   // clubs.service.ts
+  async suspendMember(id: string, data: { dateFin: string; motif: string }) {
+    return await this.prisma.inscriptions_clubs.update({
+      where: { id },
+      data: {
+        est_suspendu: true,
+        // On transforme le texte reçu du front en objet Date pour Prisma
+        date_fin_suspension: new Date(data.dateFin),
+        // Utilisation du type "string" (minuscule)
+        motif_suspension: data.motif,
+      },
+    });
+  }
 
+  async reactivateMember(id: string) {
+    return await this.prisma.inscriptions_clubs.update({
+      where: { id },
+      data: {
+        est_suspendu: false,
+        date_fin_suspension: null,
+        motif_suspension: null,
+      },
+    });
+  }
   async applyToClub(userId: string, clubId: string) {
     return await this.prisma.$transaction(async (tx) => {
       // 1. Récupérer le club et COMPTER uniquement ceux qui sont déjà 'ACCEPTE'

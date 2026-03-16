@@ -56,6 +56,21 @@ export class ClubsController {
       req.user.userId,
     );
   }
+  // src/clubs/clubs.controller.ts
+  @Patch('inscription/:id/suspend')
+  @UseGuards(AuthGuard('jwt'))
+  async suspend(
+    @Param('id') id: string,
+    @Body() data: { dateFin: string; motif: string },
+  ) {
+    return await this.clubsService.suspendMember(id, data);
+  }
+
+  @Patch('inscription/:id/reactivate')
+  @UseGuards(AuthGuard('jwt'))
+  async reactivate(@Param('id') id: string) {
+    return await this.clubsService.reactivateMember(id);
+  }
   // clubs.controller.ts
   @Delete('inscription/:id')
   @UseGuards(AuthGuard('jwt'))
