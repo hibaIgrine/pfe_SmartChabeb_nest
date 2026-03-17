@@ -160,49 +160,65 @@ export class ClubsService {
   }
   async applyToClub(userId: string, clubId: string) {
     return await this.prisma.$transaction(async (tx) => {
-      // 1. Récupérer le club et COMPTER uniquement ceux qui sont déjà 'ACCEPTE'
+      // 1. Récupérer les informations du club une seule fois
       const club = await tx.clubs.findUnique({
         where: { id: clubId },
         select: {
           capacite: true,
           _count: {
             select: {
-              inscriptions: {
-                where: { statut: 'ACCEPTE' }, // 💡 On ne compte que les vrais membres
-              },
+              inscriptions: { where: { statut: 'ACCEPTE' } },
             },
           },
         },
       });
 
-      if (!club) throw new NotFoundException('Club introuvable');
-
-      // 2. Déterminer le statut automatiquement
-      let statutFinal = 'EN_ATTENTE'; // Statut par défaut pour le responsable
-
-      // 💡 LOGIQUE DE CAPACITÉ :
-      // Si la capacité existe (pas null) et qu'elle est atteinte ou dépassée
-      if (club.capacite !== null && club._count.inscriptions >= club.capacite) {
-        statutFinal = 'LISTE_ATTENTE'; // 👈 On force l'enregistrement en LISTE_ATTENTE
+      // 💡 CORRECTION TS : On vérifie immédiatement si le club existe
+      if (!club) {
+        throw new NotFoundException('Club introuvable');
       }
 
-      // 3. Créer l'inscription avec le statut calculé
-      try {
-        const nouvelleInscription = await tx.inscriptions_clubs.create({
+      // 2. Vérifier si une inscription existe déjà pour cet utilisateur dans ce club
+      const existingRequest = await tx.inscriptions_clubs.findUnique({
+        where: {
+          id_utilisateur_id_club: { id_utilisateur: userId, id_club: clubId },
+        },
+      });
+
+      // 3. Calculer le statut cible (Plein -> Liste d'attente, sinon -> En attente)
+      const isFull =
+        club.capacite !== null && club._count.inscriptions >= club.capacite;
+      const targetStatus = isFull ? 'LISTE_ATTENTE' : 'EN_ATTENTE';
+
+      // 4. CAS : L'utilisateur a été REFUSÉ précédemment -> On réinitialise sa demande
+      if (existingRequest && existingRequest.statut === 'REFUSE') {
+        return await tx.inscriptions_clubs.update({
+          where: { id: existingRequest.id },
           data: {
-            id_utilisateur: userId,
-            id_club: clubId,
-            statut: statutFinal,
+            statut: targetStatus,
+            date_adhesion: new Date(), // On remet la date à jour
+            date_validation: null, // On efface les traces du refus
+            message: null,
+            responsable_id: null,
           },
         });
+      }
 
-        console.log(`📥 Inscription créée : ${statutFinal}`);
-        return nouvelleInscription;
-      } catch (e) {
+      // 5. CAS : L'utilisateur a déjà une demande active (ACCEPTE, EN_ATTENTE ou LISTE_ATTENTE)
+      if (existingRequest) {
         throw new ConflictException(
-          'Vous avez déjà une demande en cours pour ce club.',
+          'Une demande est déjà active pour ce club.',
         );
       }
+
+      // 6. CAS : Première inscription (pas d'entrée en base)
+      return await tx.inscriptions_clubs.create({
+        data: {
+          id_utilisateur: userId,
+          id_club: clubId,
+          statut: targetStatus,
+        },
+      });
     });
   }
 
