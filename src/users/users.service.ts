@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { MailerService } from '@nestjs-modules/mailer';
@@ -10,7 +15,9 @@ export class UsersService {
     private mailerService: MailerService,
   ) {}
 
-  // --- 1. CRÉATION (Inscription Mobile) ---
+  // ==========================================
+  // 1. CRÉATION (Inscription Mobile Adhérent)
+  // ==========================================
   async create(createUserDto: any) {
     try {
       const salt = await bcrypt.genSalt();
@@ -32,9 +39,7 @@ export class UsersService {
         },
       });
 
-      console.log(`✅ Utilisateur créé : ${user.email}. Code OTP : ${vCode}`);
-
-      // 🏆 ENVOI MAIL AVEC ATTENTE (AWAIT) POUR DIAGNOSTIC
+      // Envoi du mail de bienvenue institutionnel
       try {
         await this.mailerService.sendMail({
           to: user.email,
@@ -49,9 +54,8 @@ export class UsersService {
             </div>
           `,
         });
-        console.log(`📧 SUCCESS : Email envoyé avec succès à ${user.email}`);
       } catch (mailError) {
-        console.error('❌ ERREUR SMTP RÉELLE :', mailError.message);
+        console.error('❌ ERREUR ENVOI MAIL :', mailError.message);
       }
 
       return user;
@@ -62,161 +66,83 @@ export class UsersService {
     }
   }
 
-  // --- 2. MISE À JOUR PROFIL (Gestion Changement Email) ---
+  // ==========================================
+  // 2. GESTION DU PROFIL & STATUTS
+  // ==========================================
   async update(id: string, updateUserDto: any) {
-    try {
-      const currentUser = await this.prisma.utilisateurs.findUnique({
-        where: { id },
-      });
-      if (!currentUser)
-        throw new UnauthorizedException('Utilisateur non trouvé');
-
-      let status = 'PROFILE_UPDATED';
-
-      // Logique Email + OTP
-      if (updateUserDto.email) {
-        const newEmail = updateUserDto.email.trim().toLowerCase();
-        if (newEmail !== currentUser.email.toLowerCase()) {
-          const exists = await this.prisma.utilisateurs.findFirst({
-            where: { email: newEmail, NOT: { id: id } },
-          });
-          if (exists) throw new ConflictException('Cet email est déjà utilisé');
-
-          const vCode = Math.floor(1000 + Math.random() * 9000).toString();
-          updateUserDto.code_verification = vCode;
-          updateUserDto.est_verifie = false;
-          status = 'VERIFY_EMAIL';
-
-          await this.mailerService
-            .sendMail({
-              to: newEmail,
-              subject: 'SmartChabeb - Validation du profil',
-              html: `<h3>Ton code est : ${vCode}</h3>`,
-            })
-            .catch((e) => console.error('Erreur mail update'));
-        }
-      }
-
-      // Sécurité Mot de passe
-      if (
-        updateUserDto.mot_de_passe &&
-        updateUserDto.mot_de_passe.trim() !== ''
-      ) {
-        const salt = await bcrypt.genSalt();
-        updateUserDto.mot_de_passe = await bcrypt.hash(
-          updateUserDto.mot_de_passe,
-          salt,
-        );
-      } else {
-        delete updateUserDto.mot_de_passe;
-      }
-
-      // Nettoyage Photo
-      if (updateUserDto.photo_profil_url === '') {
-        updateUserDto.photo_profil_url = null;
-      }
-
-      const updatedUser = await this.prisma.utilisateurs.update({
-        where: { id: id },
-        data: updateUserDto,
-      });
-
-      return { user: updatedUser, status };
-    } catch (error) {
-      if (error instanceof ConflictException) throw error;
-      throw new Error('Erreur de mise à jour');
-    }
-  }
-
-  async updateRole(id: string, newRole: string) {
-    // Optionnel : Empêcher de changer son propre rôle pour ne pas s'auto-bloquer
-    return await this.prisma.utilisateurs.update({
+    const currentUser = await this.prisma.utilisateurs.findUnique({
       where: { id },
-      data: { role: newRole },
     });
+    if (!currentUser) throw new UnauthorizedException('Utilisateur non trouvé');
+
+    let status = 'PROFILE_UPDATED';
+
+    // Sécurité Mot de passe
+    if (
+      updateUserDto.mot_de_passe &&
+      updateUserDto.mot_de_passe.trim() !== ''
+    ) {
+      const salt = await bcrypt.genSalt();
+      updateUserDto.mot_de_passe = await bcrypt.hash(
+        updateUserDto.mot_de_passe,
+        salt,
+      );
+    } else {
+      delete updateUserDto.mot_de_passe;
+    }
+
+    const updatedUser = await this.prisma.utilisateurs.update({
+      where: { id },
+      data: updateUserDto,
+    });
+
+    return { user: updatedUser, status };
   }
-  // --- AUTRES MÉTHODES ---
+
   async verifyEmail(email: string, code: string) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { email },
     });
     if (!user || user.code_verification !== code)
       throw new UnauthorizedException('Code incorrect.');
+
     return await this.prisma.utilisateurs.update({
       where: { email },
       data: { est_verifie: true, code_verification: null },
     });
   }
 
-  async saveBiometrics(dto: any) {
-    const user = await this.prisma.utilisateurs.findUnique({
-      where: { email: dto.email },
-    });
-
-    // 🛡️ SÉCURITÉ : On vérifie si l'utilisateur existe avant d'utiliser son ID
-    if (!user) {
-      throw new UnauthorizedException(
-        'Utilisateur non trouvé pour la biométrie',
-      );
-    }
-
-    const imc = dto.poids / ((dto.taille / 100) * (dto.taille / 100));
-
-    return await this.prisma.suivi_biometrique.create({
-      data: {
-        id_utilisateur: user.id, // Maintenant TypeScript est sûr que user existe
-        poids_kg: dto.poids,
-        taille_cm: dto.taille,
-        imc: parseFloat(imc.toFixed(2)),
-        date_mesure: new Date(),
-      },
-    });
-  }
-
+  // ==========================================
+  // 3. RECHERCHE ET LISTES (ADMIN & COACH)
+  // ==========================================
   async findAll(requesterId?: string, requesterRole?: string) {
     try {
-      // 🛡️ CAS DU COACH : Filtrage par salle + Inclusion des Clubs
+      // 🛡️ CAS DU RESPONSABLE / COACH : Filtrage par centre
       if (requesterRole === 'COACH' && requesterId) {
         const coach = await this.prisma.utilisateurs.findUnique({
           where: { id: requesterId },
-          select: { id_salle: true },
+          select: { id_centre: true },
         });
 
-        if (!coach || !coach.id_salle) return [];
+        if (!coach || !coach.id_centre) return [];
 
         return await this.prisma.utilisateurs.findMany({
-          where: {
-            id_salle: coach.id_salle,
-            role: 'ADHERENT',
-          },
+          where: { id_centre: coach.id_centre, role: 'ADHERENT' },
           include: {
-            salles: true,
-            suivi_biometrique: { orderBy: { date_mesure: 'desc' }, take: 1 },
-            // 🏆 AJOUT : On récupère les clubs du jeune
-            inscriptions_clubs: {
-              include: { club: true },
-            },
+            centre: true,
+            inscriptions_clubs: { include: { club: true } },
           },
           orderBy: { nom: 'asc' },
         });
       }
 
-      // 🛡️ CAS DE L'ADMIN : Vue globale + Inclusion des Clubs
+      // 🛡️ CAS DE L'ADMIN : Vue globale
       return await this.prisma.utilisateurs.findMany({
         include: {
-          salles: { select: { id: true, nom: true, gouvernorat: true } },
-          _count: {
-            select: {
-              journal_repas: true,
-              programmes_sportifs_programmes_sportifs_id_membreToutilisateurs: true,
-              inscriptions_clubs: true, // Compte des clubs
-            },
+          centre: {
+            select: { id: true, nom: true, gouvernorat: true },
           },
-          suivi_biometrique: { orderBy: { date_mesure: 'desc' }, take: 1 },
-          // 🏆 AJOUT : On récupère les clubs pour le filtrage Front
-          inscriptions_clubs: {
-            include: { club: true },
-          },
+          inscriptions_clubs: { include: { club: true } },
         },
         orderBy: { nom: 'asc' },
       });
@@ -226,17 +152,21 @@ export class UsersService {
     }
   }
 
-  async updateStatus(id: string, data: any) {
-    // Si on change le rôle, on le force en MAJUSCULES et on remplace les espaces
-    if (data.role) {
-      data.role = data.role.toUpperCase().replace(/\s+/g, '_');
-    }
-
-    return await this.prisma.utilisateurs.update({
+  async findOne(id: string) {
+    const user = await this.prisma.utilisateurs.findUnique({
       where: { id },
-      data: data,
+      include: {
+        centre: true,
+        inscriptions_clubs: { include: { club: true } },
+      },
     });
+    if (!user) throw new NotFoundException('Utilisateur introuvable');
+    return user;
   }
+
+  // ==========================================
+  // 4. ACTIONS ADMINISTRATIVES (Ban, Role, Centre)
+  // ==========================================
   async banUser(id: string, days: number, reason: string) {
     const finBan = new Date();
     finBan.setDate(finBan.getDate() + days);
@@ -246,63 +176,32 @@ export class UsersService {
     });
   }
 
-  async findOne(id: string) {
-    return await this.prisma.utilisateurs.findUnique({
-      where: { id },
-      include: {
-        salles: true,
-        suivi_biometrique: { orderBy: { date_mesure: 'desc' }, take: 1 },
-        programmes_sportifs_programmes_sportifs_id_membreToutilisateurs: {
-          orderBy: [{ date_creation: 'desc' }, { id: 'desc' }],
-        },
-      },
-    });
-  }
-  async updateProfile(email: string, updateProfileDto: any) {
+  async updateStatus(id: string, data: any) {
+    if (data.role) data.role = data.role.toUpperCase().replace(/\s+/g, '_');
     return await this.prisma.utilisateurs.update({
-      where: { email: email },
-      data: {
-        genre: updateProfileDto.genre,
-        date_naissance: new Date(updateProfileDto.date_naissance),
-      },
+      where: { id },
+      data,
     });
-  }
-  async getProfileWithBiometrics(userId: string) {
-    const user = await this.prisma.utilisateurs.findUnique({
-      where: { id: userId },
-      include: {
-        salles: true,
-        suivi_biometrique: { orderBy: { date_mesure: 'desc' }, take: 1 },
-      },
-    });
-    if (!user) throw new UnauthorizedException('Utilisateur non trouvé');
-    return user;
   }
 
-  async assignToSalleByEmail(email: string, id_salle: string) {
+  async assignToCentreByEmail(email: string, id_centre: string) {
     return await this.prisma.utilisateurs.update({
       where: { email },
-      data: { id_salle },
+      data: { id_centre },
+    });
+  }
+
+  async findStaffByCentre(id_centre: string) {
+    return await this.prisma.utilisateurs.findMany({
+      where: {
+        id_centre,
+        role: { in: ['COACH', 'ANIMATEUR', 'RESPONSABLE_CLUB'] },
+      },
+      select: { id: true, nom: true, prenom: true, role: true },
     });
   }
 
   async remove(id: string) {
     return await this.prisma.utilisateurs.delete({ where: { id } });
-  }
-  // Ajouter dans users.service.ts
-  async findStaffBySalle(id_salle: string) {
-    return await this.prisma.utilisateurs.findMany({
-      where: {
-        id_salle: id_salle,
-        // Filtre uniquement les membres du staff
-        role: { in: ['COACH', 'ANIMATEUR', 'RESPONSABLE_CLUB'] },
-      },
-      select: {
-        id: true,
-        nom: true,
-        prenom: true,
-        role: true,
-      },
-    });
   }
 }

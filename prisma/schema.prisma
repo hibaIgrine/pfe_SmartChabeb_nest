@@ -7,6 +7,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ==========================================
+// 1. MODULE AUTHENTIFICATION & RÔLES
+// ==========================================
+
 model roles {
   id           String         @id @default(uuid()) @db.Uuid
   nom          String         @unique @db.VarChar(50)
@@ -14,19 +18,79 @@ model roles {
   utilisateurs utilisateurs[]
 }
 
+model utilisateurs {
+  id                  String                @id @default(uuid()) @db.Uuid
+  nom                 String                @db.VarChar(100)
+  prenom              String                @db.VarChar(100)
+  email               String                @unique @db.VarChar(255)
+  mot_de_passe        String                @db.VarChar(255)
+  role                String                @db.VarChar(50)
+  genre               String?               @db.VarChar(10)
+  date_naissance      DateTime?             @db.Date
+  photo_profil_url    String?               @db.VarChar(255)
+  compte_actif        Boolean?              @default(true)
+  est_verifie         Boolean?              @default(false)
+  date_fin_ban        DateTime?
+  motif_ban           String?               @db.VarChar(255)
+  bio                 String?               @db.Text
+  code_verification   String?               @db.VarChar(6)
+  reset_token         String?               @db.VarChar(6)
+  reset_token_expires DateTime?
+
+  // Relations
+  id_role             String?               @db.Uuid
+  role_obj            roles?                @relation(fields: [id_role], references: [id], onDelete: SetNull)
+  
+  id_centre           String?               @db.Uuid // 💡 Renommé
+  centre              centres?              @relation(fields: [id_centre], references: [id], onDelete: SetNull)
+  
+  clubs_diriges       clubs[]               @relation("coach_club")
+  inscriptions_clubs  inscriptions_clubs[]
+  staff_dans_clubs    club_staff[]
+  reservations        reservations_locaux[]
+}
+
+// ==========================================
+// 2. MODULE INSTITUTIONS (CENTRES)
+// ==========================================
+
+model centres { // 💡 Le modèle s'appelle maintenant centres
+  id              String         @id @default(uuid()) @db.Uuid
+  nom             String         @unique @db.VarChar(100)
+  gouvernorat     String         @db.VarChar(100)
+  delegation      String?        @db.VarChar(100)
+  adresse         String?        @db.VarChar(255)
+  code_postal     String?        @db.VarChar(10)
+  telephone_centre String?       @db.VarChar(20)
+  date_creation   DateTime?      @default(now()) @db.Date
+
+  // Relations
+  utilisateurs    utilisateurs[]
+  clubs           clubs[]
+  locaux          locaux[]       // Les espaces physiques (Théâtre, Terrain)
+  inventaire      equipements[]  // Le matériel du centre
+}
+
+// ==========================================
+// 3. MODULE CLUBS & ACTIVITÉS
+// ==========================================
+
 model clubs {
   id           String               @id @default(uuid()) @db.Uuid
   nom          String               @db.VarChar(100)
-  description  String?
+  description  String?              @db.Text
   categorie    String               @db.VarChar(50)
   logo_url     String?              @db.VarChar(255)
   planning     Json?
   capacite     Int?
-  locale       String?
+  locale_fixe  String?              @db.VarChar(100)
+
+  // Relations
+  id_centre    String               @db.Uuid // 💡 Renommé
+  centre       centres              @relation(fields: [id_centre], references: [id], onDelete: Cascade)
   id_coach     String?              @db.Uuid
-  id_salle     String               @db.Uuid
-  salles       salles               @relation(fields: [id_salle], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  coach        utilisateurs?        @relation("coach_club", fields: [id_coach], references: [id], onDelete: SetNull)
+  responsable  utilisateurs?        @relation("coach_club", fields: [id_coach], references: [id], onDelete: SetNull)
+  
   staff        club_staff[]
   inscriptions inscriptions_clubs[]
 }
@@ -36,284 +100,90 @@ model club_staff {
   id_club        String       @db.Uuid
   id_utilisateur String       @db.Uuid
   role_dans_club String       @db.VarChar(50)
-  club           clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  utilisateur    utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  
+  club           clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)
+  utilisateur    utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 
   @@unique([id_club, id_utilisateur])
 }
 
 model inscriptions_clubs {
-  id              String       @id @default(uuid()) @db.Uuid
-  id_utilisateur  String       @db.Uuid
-  id_club         String       @db.Uuid
-  statut          String       @default("EN_ATTENTE")
-  date_adhesion   DateTime     @default(now()) @db.Timestamp(6)
-  date_validation DateTime?    @db.Timestamp(6)
-  est_suspendu    Boolean      @default(false) // 💡 Nouveau
+  id                  String    @id @default(uuid()) @db.Uuid
+  id_utilisateur      String    @db.Uuid
+  id_club             String    @db.Uuid
+  statut              String    @default("EN_ATTENTE")
+  date_adhesion       DateTime  @default(now()) @db.Timestamp(6)
+  date_validation     DateTime? @db.Timestamp(6)
+  est_suspendu        Boolean   @default(false)
   date_fin_suspension DateTime?
   motif_suspension    String?
-  role_interne    String?      @default("MEMBRE") // 💡 Nouveau (ex: DELEGUE)
-  message         String?
-  responsable_id  String?      @db.Uuid
-  club            clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)
-  utilisateur     utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
+  role_interne        String?   @default("MEMBRE")
+  responsable_id      String?   @db.Uuid
+
+  club                clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)
+  utilisateur         utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 
   @@unique([id_utilisateur, id_club])
 }
 
-model abonnements_membres {
-  id                   String                @id @default(uuid()) @db.Uuid
-  id_utilisateur       String?               @db.Uuid
-  id_forfait           String?               @db.Uuid
-  id_paiement          String?               @db.Uuid
-  date_debut           DateTime?             @db.Date
-  date_fin             DateTime?             @db.Date
-  etat_abonnement      String?               @db.VarChar(50)
-  forfaits             forfaits?             @relation(fields: [id_forfait], references: [id], onDelete: SetNull)
-  paiements_historique paiements_historique? @relation(fields: [id_paiement], references: [id], onDelete: SetNull)
-  utilisateurs         utilisateurs?         @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-}
+// ==========================================
+// 4. MODULE GESTION DES LOCAUX & RÉSERVATIONS
+// ==========================================
 
-model allergies {
-  id              String        @id @default(uuid()) @db.Uuid
-  id_utilisateur  String?       @db.Uuid
-  nom_aliment     String?       @db.VarChar(100)
-  niveau_severite String?       @db.VarChar(50)
-  commentaire     String?
-  utilisateurs    utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-}
+model locaux {
+  id             String   @id @default(uuid()) @db.Uuid
+  nom            String   @db.VarChar(100)
+  type           String   @db.VarChar(50)
+  capacite       Int?
+  localisation   String?  
+  prix_heure     Decimal? @db.Decimal(10, 2)
+  description    String?  @db.Text
+  image_url      String?  @db.VarChar(255)
+  est_actif      Boolean  @default(true)
 
-model blessures {
-  id             String        @id @default(uuid()) @db.Uuid
-  id_utilisateur String?       @db.Uuid
-  nom_blessure   String?       @db.VarChar(100)
-  description    String?
-  est_gueri      Boolean?      @default(false)
-  utilisateurs   utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-}
-
-model categories_produits {
-  id                     String     @id @default(uuid()) @db.Uuid
-  nom_categorie          String?    @db.VarChar(100)
-  description_categories String?
-  produits               produits[]
-}
-
-model commandes {
-  id                   String                @id @default(uuid()) @db.Uuid
-  id_utilisateur       String?               @db.Uuid
-  id_paiement          String?               @db.Uuid
-  date_commande        DateTime?             @default(now()) @db.Timestamp(6)
-  statut_commande      String?               @db.VarChar(50)
-  montant_total        Decimal?              @db.Decimal(10, 2)
-  paiements_historique paiements_historique? @relation(fields: [id_paiement], references: [id], onDelete: SetNull)
-  utilisateurs         utilisateurs?         @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-  ligne_commandes      ligne_commandes[]
+  // Relations
+  id_centre      String   @db.Uuid // 💡 Renommé
+  centre         centres  @relation(fields: [id_centre], references: [id], onDelete: Cascade)
+  
+  reservations   reservations_locaux[]
+  equipements    room_equipment[]
 }
 
 model equipements {
-  id                      String         @id @default(uuid()) @db.Uuid
-  id_salle                String?        @db.Uuid
-  nom_machine             String?        @db.VarChar(100)
-  marque                  String?        @db.VarChar(100)
-  code_qr_machine         String?        @unique @db.VarChar(255)
-  etat_actuel             String?        @db.VarChar(50)
-  date_dernier_reparation DateTime?      @db.Date
-  salles                  salles?        @relation(fields: [id_salle], references: [id], onDelete: Cascade)
-  exercices               exercices[]
-  reclamations            reclamations[]
+  id          String   @id @default(uuid()) @db.Uuid
+  nom         String   @db.VarChar(100)
+  description String?  @db.Text
+  etat        String   @default("BON")
+  quantite    Int      @default(1)
+
+  // Relations
+  id_centre   String   @db.Uuid // 💡 Renommé
+  centre      centres  @relation(fields: [id_centre], references: [id], onDelete: Cascade)
+  locaux_lies room_equipment[]
 }
 
-model exercices {
-  id               String       @id @default(uuid()) @db.Uuid
-  id_equipement    String?      @db.Uuid
-  nom_exercice     String?      @db.VarChar(100)
-  muscle_travaille String?      @db.VarChar(100)
-  video_tuto_url   String?      @db.VarChar(255)
-  equipements      equipements? @relation(fields: [id_equipement], references: [id], onDelete: Cascade)
+model room_equipment {
+  id            String      @id @default(uuid()) @db.Uuid
+  id_local      String      @db.Uuid
+  id_equipement String      @db.Uuid
+  local         locaux      @relation(fields: [id_local], references: [id], onDelete: Cascade)
+  equipement    equipements @relation(fields: [id_equipement], references: [id], onDelete: Cascade)
+
+  @@unique([id_local, id_equipement])
 }
 
-model forfaits {
-  id                  String                @id @default(uuid()) @db.Uuid
-  nom_offre           String?               @db.VarChar(100)
-  description_offre   String?
-  prix_offre          Decimal?              @db.Decimal(10, 2)
-  nombre_jours        Int?
-  abonnements_membres abonnements_membres[]
-}
+model reservations_locaux {
+  id              String    @id @default(uuid()) @db.Uuid
+  date_reservation DateTime @db.Date
+  heure_debut     DateTime  @db.Timestamp(6)
+  heure_fin       DateTime  @db.Timestamp(6)
+  objet           String    @db.VarChar(255)
+  statut          String    @default("EN_ATTENTE")
+  prix_total      Decimal?  @db.Decimal(10, 2)
+  date_creation   DateTime  @default(now())
 
-model interactions_sociales {
-  id               String        @id @default(uuid()) @db.Uuid
-  id_utilisateur   String?       @db.Uuid
-  id_publication   String?       @db.Uuid
-  est_un_like      Boolean?
-  text_commentaire String?
-  partage          Boolean?
-  publications     publications? @relation(fields: [id_publication], references: [id], onDelete: Cascade)
-  utilisateurs     utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-}
-
-model journal_repas {
-  id                  String        @id @default(uuid()) @db.Uuid
-  id_utilisateur      String?       @db.Uuid
-  photo_repas_url     String?       @db.VarChar(255)
-  type_repas          String?       @db.VarChar(50)
-  calories            Int?
-  proteins            Decimal?      @db.Decimal(5, 2)
-  glucides            Decimal?      @db.Decimal(5, 2)
-  lipides             Decimal?      @db.Decimal(5, 2)
-  analyse_complete_ia Json?
-  date_repas          DateTime?     @default(dbgenerated("CURRENT_DATE")) @db.Date
-  utilisateurs        utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-}
-
-model ligne_commandes {
-  id            String     @id @default(uuid()) @db.Uuid
-  id_produit    String?    @db.Uuid
-  id_commande   String?    @db.Uuid
-  quantite      Int?
-  prix_unitaire Decimal?   @db.Decimal(10, 2)
-  commandes     commandes? @relation(fields: [id_commande], references: [id], onDelete: Cascade)
-  produits      produits?  @relation(fields: [id_produit], references: [id], onDelete: SetNull)
-}
-
-model paiements_historique {
-  id                  String                @id @default(uuid()) @db.Uuid
-  id_utilisateur      String?               @db.Uuid
-  montant_paye        Decimal?              @db.Decimal(10, 2)
-  date_paiement       DateTime?             @default(now()) @db.Timestamp(6)
-  id_transaction      String?               @db.VarChar(255)
-  statut_paiement     String?               @db.VarChar(50)
-  moyen_paiement      String?               @db.VarChar(50)
-  abonnements_membres abonnements_membres[]
-  commandes           commandes[]
-  utilisateurs        utilisateurs?         @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-}
-
-model points_fidelite {
-  id              String        @id @default(uuid()) @db.Uuid
-  id_utilisateur  String?       @unique @db.Uuid
-  total_points_xp Int?          @default(0)
-  niveau_actuel   Int?          @default(1)
-  liste_badge     Json?
-  utilisateurs    utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-}
-
-model produits {
-  id                  String               @id @default(uuid()) @db.Uuid
-  id_categorie        String?              @db.Uuid
-  id_salle            String?              @db.Uuid
-  nom_produit         String?              @db.VarChar(100)
-  description_produit String?
-  prix                Decimal?             @db.Decimal(10, 2)
-  stock_quantite      Int?
-  image_produit_url   String?              @db.VarChar(255)
-  caracteristiques    Json?
-  ligne_commandes     ligne_commandes[]
-  categories_produits categories_produits? @relation(fields: [id_categorie], references: [id], onDelete: SetNull)
-  salles              salles?              @relation(fields: [id_salle], references: [id], onDelete: Cascade)
-}
-
-model programmes_sportifs {
-  id                                                       String        @id @default(uuid()) @db.Uuid
-  id_coach                                                 String?       @db.Uuid
-  id_membre                                                String?       @db.Uuid
-  titre_programme                                          String?       @db.VarChar(100)
-  details_exercices                                        Json?
-  cree_par_ia                                              Boolean?
-  date_creation                                            DateTime      @default(now()) @db.Timestamp(6)
-  utilisateurs_programmes_sportifs_id_coachToutilisateurs  utilisateurs? @relation("programmes_sportifs_id_coachToutilisateurs", fields: [id_coach], references: [id], onDelete: SetNull)
-  utilisateurs_programmes_sportifs_id_membreToutilisateurs utilisateurs? @relation("programmes_sportifs_id_membreToutilisateurs", fields: [id_membre], references: [id], onDelete: Cascade)
-}
-
-model publications {
-  id                    String                  @id @default(uuid()) @db.Uuid
-  id_utilisateur        String?                 @db.Uuid
-  texte_post            String?
-  image_post_url        String?                 @db.VarChar(255)
-  date_publication      DateTime?               @default(now()) @db.Timestamp(6)
-  interactions_sociales interactions_sociales[]
-  utilisateurs          utilisateurs?           @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-}
-
-model reclamations {
-  id                 String        @id @default(uuid()) @db.Uuid
-  id_equipement      String?       @db.Uuid
-  id_utilisateur     String?       @db.Uuid
-  sujet              String?       @db.VarChar(255)
-  description        String?
-  priorite           String?       @db.VarChar(50)
-  date_creation      DateTime?     @default(now()) @db.Timestamp(6)
-  statut_reclamation String?       @db.VarChar(50)
-  equipements        equipements?  @relation(fields: [id_equipement], references: [id], onDelete: Cascade)
-  utilisateurs       utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-}
-
-model salles {
-  id              String         @id @default(uuid()) @db.Uuid
-  nom             String         @unique @db.VarChar(100)
-  gouvernorat     String         @db.VarChar(100)
-  delegation      String?        @db.VarChar(100)
-  code_postal     String?        @db.VarChar(10)
-  adresse         String?        @db.VarChar(255)
-  telephone_salle String?        @db.VarChar(20)
-  latitude        Float?
-  longitude       Float?
-  date_creation   DateTime?      @default(now()) @db.Date
-  clubs           clubs[]
-  equipements     equipements[]
-  produits        produits[]
-  utilisateurs    utilisateurs[]
-}
-
-model suivi_biometrique {
-  id             String        @id @default(uuid()) @db.Uuid
-  id_utilisateur String?       @db.Uuid
-  poids_kg       Decimal?      @db.Decimal(5, 2)
-  taille_cm      Int?
-  imc            Decimal?      @db.Decimal(5, 2)
-  date_mesure    DateTime?     @default(now()) @db.Timestamp(6)
-  utilisateurs   utilisateurs? @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-}
-
-model utilisateurs {
-  id                                                              String                  @id @default(uuid()) @db.Uuid
-  id_salle                                                        String?                 @db.Uuid
-  nom                                                             String                  @db.VarChar(100)
-  prenom                                                          String                  @db.VarChar(100)
-  mot_de_passe                                                    String                  @db.VarChar(255)
-  email                                                           String                  @unique @db.VarChar(255)
-  role                                                            String                  @db.VarChar(50)
-  genre                                                           String?                 @db.VarChar(10)
-  date_naissance                                                  DateTime?               @db.Date
-  objectif_principal                                              String?                 @db.VarChar(255)
-  niveau_sportif                                                  String?                 @db.VarChar(100)
-  photo_profil_url                                                String?                 @db.VarChar(255)
-  compte_actif                                                    Boolean?                @default(true)
-  code_verification                                               String?                 @db.VarChar(6)
-  est_verifie                                                     Boolean?                @default(false)
-  date_fin_ban                                                    DateTime?
-  bio                                                             String?                 @db.Text  
-  motif_ban                                                       String?                 @db.VarChar(255)
-  reset_token                                                     String?                 @db.VarChar(6)
-  reset_token_expires                                             DateTime?
-  abonnements_membres                                             abonnements_membres[]
-  allergies                                                       allergies[]
-  blessures                                                       blessures[]
-  clubs_diriges                                                   clubs[]                 @relation("coach_club")
-  commandes                                                       commandes[]
-  inscriptions_clubs                                              inscriptions_clubs[]
-  interactions_sociales                                           interactions_sociales[]
-  journal_repas                                                   journal_repas[]
-  paiements_historique                                            paiements_historique[]
-  points_fidelite                                                 points_fidelite?
-  programmes_sportifs_programmes_sportifs_id_coachToutilisateurs  programmes_sportifs[]   @relation("programmes_sportifs_id_coachToutilisateurs")
-  programmes_sportifs_programmes_sportifs_id_membreToutilisateurs programmes_sportifs[]   @relation("programmes_sportifs_id_membreToutilisateurs")
-  publications                                                    publications[]
-  id_role                                                         String?                 @db.Uuid
-  role_obj                                                        roles?                  @relation(fields: [id_role], references: [id], onDelete: SetNull)
-  reclamations                                                    reclamations[]
-  suivi_biometrique                                               suivi_biometrique[]
-  staff_dans_clubs                                                club_staff[]
-  salles                                                          salles?                 @relation(fields: [id_salle], references: [id], onDelete: SetNull)
+  id_utilisateur  String       @db.Uuid
+  utilisateur     utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
+  id_local        String       @db.Uuid
+  local           locaux       @relation(fields: [id_local], references: [id], onDelete: Cascade)
 }

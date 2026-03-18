@@ -6,11 +6,11 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { ForfaitsModule } from './forfaits/forfaits.module';
-import { SallesModule } from './salles/salles.module';
-import { ProgrammesModule } from './programmes/programmes.module';
+
 import { ClubsModule } from './clubs/clubs.module';
 import { RolesModule } from './roles/roles.module';
+import { CentresModule } from './centres/centres.module';
+import { LocauxModule } from './locaux/locaux.module';
 
 @Module({
   imports: [
@@ -21,7 +21,7 @@ import { RolesModule } from './roles/roles.module';
     PrismaModule,
     UsersModule,
     AuthModule,
-    
+
     // 2. Configuration Robuste du Mailer
     MailerModule.forRootAsync({
       imports: [ConfigModule],
@@ -41,12 +41,10 @@ import { RolesModule } from './roles/roles.module';
       }),
       inject: [ConfigService],
     }),
-
-    ForfaitsModule,
-    SallesModule,
-    ProgrammesModule,
+    CentresModule,
     ClubsModule,
     RolesModule,
+    LocauxModule,
   ],
   controllers: [AppController],
   providers: [AppService],

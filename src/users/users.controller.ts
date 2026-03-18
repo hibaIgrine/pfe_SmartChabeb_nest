@@ -16,13 +16,12 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { VerifyUserDto } from './dto/verify-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { BiometricsDto } from './dto/biometrics.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { BanUserDto } from './dto/ban-user.dto';
 import { ChangeRoleDto } from './dto/change-role.dto';
 import { ChangeStatusDto } from './dto/change-status.dto';
-import { AssignSalleByEmailDto } from './dto/assign-salle.dto';
+import { AssignSalleByEmailDto } from './dto/assign-salle.dto'; // Tu pourras renommer le fichier DTO plus tard
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -31,7 +30,9 @@ import { extname } from 'path';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  // --- 1. ROUTES PUBLIQUES (INSCRIPTION & VALIDATION) ---
+  // ==========================================
+  // 1. ROUTES PUBLIQUES (INSCRIPTION & OTP)
+  // ==========================================
 
   @Post()
   create(@Body() createUserDto: CreateUserDto) {
@@ -46,41 +47,26 @@ export class UsersController {
     );
   }
 
-  @Post('biometrics')
-  async addBiometrics(@Body() biometricsDto: BiometricsDto) {
-    return await this.usersService.saveBiometrics(biometricsDto);
-  }
-
-  @Patch('me/assign-salle')
-  async assignSalleByEmail(@Body() body: AssignSalleByEmailDto) {
-    return await this.usersService.assignToSalleByEmail(
-      body.email,
-      body.id_salle,
-    );
-  }
-
-  @Patch('update-profile')
-  async updateProfile(@Body() updateProfileDto: UpdateProfileDto) {
-    return await this.usersService.updateProfile(
-      updateProfileDto.email,
-      updateProfileDto,
-    );
-  }
-
-  // --- 2. ROUTES PRIVÉES (TOKEN REQUIS) ---
+  // ==========================================
+  // 2. ROUTES PRIVÉES (MON PROFIL)
+  // ==========================================
 
   @Get('me/profile')
   @UseGuards(AuthGuard('jwt'))
   async getMyProfile(@Request() req: any) {
-    return await this.usersService.getProfileWithBiometrics(req.user.userId);
+    // Appelle findOne qui inclut maintenant les clubs et le centre
+    return await this.usersService.findOne(req.user.userId);
   }
-  // Ajouter dans users.controller.ts
-  @Get('staff/:id_salle')
-  @UseGuards(AuthGuard('jwt'))
-  async getStaffBySalle(@Param('id_salle') id_salle: string) {
-    return await this.usersService.findStaffBySalle(id_salle);
+
+  @Patch('me/assign-centre') // 💡 salle -> centre
+  async assignCentreByEmail(@Body() body: any) {
+    return await this.usersService.assignToCentreByEmail(
+      body.email,
+      body.id_centre,
+    );
   }
-  // CETTE ROUTE UNIQUE GÈRE TOUT : MISE À JOUR + UPLOAD IMAGE
+
+  // MISE À JOUR + UPLOAD IMAGE
   @Patch(':id')
   @UseGuards(AuthGuard('jwt'))
   @UseInterceptors(
@@ -103,13 +89,20 @@ export class UsersController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (file) {
-      // ⚠️ METS À JOUR CETTE IP SI ELLE CHANGE DANS TA CONSTANTS.DART
       updateUserDto.photo_profil_url = `${process.env.API_URL}/uploads/${file.filename}`;
     }
     return await this.usersService.update(id, updateUserDto);
   }
 
-  // --- 3. ROUTES ADMINISTRATIVES & COACHING ---
+  // ==========================================
+  // 3. ROUTES ADMINISTRATIVES & STAFF
+  // ==========================================
+
+  @Get('staff-by-centre/:id_centre') // 💡 salle -> centre
+  @UseGuards(AuthGuard('jwt'))
+  async getStaffByCentre(@Param('id_centre') id_centre: string) {
+    return await this.usersService.findStaffByCentre(id_centre);
+  }
 
   @Get()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -129,9 +122,9 @@ export class UsersController {
   @Roles('ADMIN')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   async changeRole(@Param('id') id: string, @Body() body: ChangeRoleDto) {
-    // 👈 Utilise bien le DTO ici
     return await this.usersService.updateStatus(id, { role: body.role });
   }
+
   @Patch(':id/status')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')
@@ -148,14 +141,14 @@ export class UsersController {
     return await this.usersService.banUser(id, body.days, body.reason);
   }
 
-  @Patch(':id/assign-salle')
+  @Patch(':id/assign-centre') // 💡 salle -> centre
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')
-  async assignSalleById(
+  async assignCentreById(
     @Param('id') id: string,
-    @Body('id_salle') id_salle: string,
+    @Body('id_centre') id_centre: string,
   ) {
-    return await this.usersService.updateStatus(id, { id_salle });
+    return await this.usersService.updateStatus(id, { id_centre });
   }
 
   @Delete(':id')

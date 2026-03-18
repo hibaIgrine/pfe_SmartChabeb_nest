@@ -35,14 +35,14 @@ async function main() {
   );
 
   for (const c of centresArabes) {
-    await prisma.salles.create({
+    await prisma.centres.create({
       data: {
         nom: c.nom,
         gouvernorat: c.gouvernorat,
         delegation: c.delegation,
         code_postal: c.code_postal,
         adresse: c.adresse,
-        telephone_salle: c.tel, // On lie 'tel' du JSON à 'telephone_salle' de la BDD
+        telephone_centre: c.tel, // On lie 'tel' du JSON à 'telephone_salle' de la BDD
       },
     });
   }

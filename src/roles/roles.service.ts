@@ -7,27 +7,34 @@ import { PrismaService } from 'src/prisma/prisma.service';
 export class RolesService {
   constructor(private prisma: PrismaService) {}
 
+  // ==========================================
+  // Créer un nouveau grade (RBAC Dynamique)
+  // ==========================================
   async create(createRoleDto: CreateRoleDto) {
     try {
       return await this.prisma.roles.create({
         data: {
-          nom: createRoleDto.nom.toUpperCase(),
+          nom: createRoleDto.nom.toUpperCase().trim(),
           description: createRoleDto.description,
         },
       });
     } catch (error) {
       if (error.code === 'P2002')
-        throw new ConflictException('Ce rôle existe déjà');
+        throw new ConflictException('Ce rôle existe déjà dans le système.');
       throw error;
     }
   }
 
+  // ==========================================
+  // Lister les rôles avec les utilisateurs et leurs centres
+  // ==========================================
   async findAll() {
     return await this.prisma.roles.findMany({
       include: {
         utilisateurs: {
           include: {
-            salles: true, // 🏆 CRUCIAL : Sans ça, le front ne connaît pas la région de l'utilisateur
+            // 💡 id_salle -> id_centre et salles -> centre
+            centre: true,
           },
         },
       },
@@ -35,22 +42,38 @@ export class RolesService {
     });
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} role`;
-  }
-
-  update(id: number, updateRoleDto: UpdateRoleDto) {
-    return `This action updates a #${id} role`;
-  }
-
+  // ==========================================
+  // Supprimer un grade (Sécurisé)
+  // ==========================================
   async remove(id: string) {
-    // Sécurité : ne pas supprimer un rôle si des membres l'utilisent encore
+    // 🛡️ Sécurité : On vérifie si des utilisateurs portent encore ce grade
     const count = await this.prisma.utilisateurs.count({
       where: { id_role: id },
     });
-    if (count > 0)
-      throw new ConflictException('Ce rôle est utilisé par des membres');
 
-    return this.prisma.roles.delete({ where: { id } });
+    if (count > 0) {
+      throw new ConflictException(
+        `Impossible de supprimer : ${count} utilisateur(s) possèdent encore ce grade.`,
+      );
+    }
+
+    return this.prisma.roles.delete({
+      where: { id },
+    });
+  }
+
+  // Fonctions de base (à implémenter si besoin pour ton CRUD)
+  findOne(id: string) {
+    return this.prisma.roles.findUnique({ where: { id } });
+  }
+
+  async update(id: string, updateRoleDto: UpdateRoleDto) {
+    return await this.prisma.roles.update({
+      where: { id },
+      data: {
+        nom: updateRoleDto.nom?.toUpperCase().trim(),
+        description: updateRoleDto.description,
+      },
+    });
   }
 }
