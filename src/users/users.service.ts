@@ -38,7 +38,9 @@ export class UsersService {
           est_verifie: false,
         },
       });
-
+      console.log(
+        `\n🚀 [INSCRIPTION] Nouveau code OTP pour ${user.email} : ${vCode}\n`,
+      );
       // Envoi du mail de bienvenue institutionnel
       try {
         await this.mailerService.sendMail({
@@ -110,6 +112,24 @@ export class UsersService {
       where: { email },
       data: { est_verifie: true, code_verification: null },
     });
+  }
+  // src/users/users.service.ts
+
+  async updateProfile(email: string, updateProfileDto: any) {
+    try {
+      const user = await this.prisma.utilisateurs.update({
+        where: { email: email.toLowerCase().trim() },
+        data: {
+          genre: updateProfileDto.genre,
+          // On s'assure que la date est bien un objet Date
+          date_naissance: new Date(updateProfileDto.date_naissance),
+        },
+      });
+      return user;
+    } catch (error) {
+      console.error('Erreur updateProfile:', error);
+      throw new UnauthorizedException('Impossible de mettre à jour le profil');
+    }
   }
 
   // ==========================================

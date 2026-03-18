@@ -11,6 +11,7 @@ import { ClubsModule } from './clubs/clubs.module';
 import { RolesModule } from './roles/roles.module';
 import { CentresModule } from './centres/centres.module';
 import { LocauxModule } from './locaux/locaux.module';
+import { ReservationsModule } from './reservations/reservations.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { LocauxModule } from './locaux/locaux.module';
     ClubsModule,
     RolesModule,
     LocauxModule,
+    ReservationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

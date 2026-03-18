@@ -46,6 +46,13 @@ export class UsersController {
       verifyUserDto.code,
     );
   }
+  @Patch('update-profile') // 💡 C'est la route appelée par Flutter à l'étape 3
+  async updateProfile(@Body() updateProfileDto: any) {
+    return await this.usersService.updateProfile(
+      updateProfileDto.email,
+      updateProfileDto,
+    );
+  }
 
   // ==========================================
   // 2. ROUTES PRIVÉES (MON PROFIL)
