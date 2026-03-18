@@ -26,7 +26,13 @@ export class ReservationsController {
   findAll(@Request() req) {
     return this.resService.findAll(req.user.userId, req.user.role);
   }
-
+  @Get('occupied')
+  async getOccupied(
+    @Query('id_local') localId: string,
+    @Query('date') date: string,
+  ) {
+    return await this.resService.getOccupiedSlots(localId, date);
+  }
   @Get('check')
   async check(@Query() q: any) {
     const isFree = await this.resService.checkAvailability(
