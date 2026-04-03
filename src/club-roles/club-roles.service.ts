@@ -11,14 +11,28 @@ import { UpdateClubRoleDto } from './dto/update-club-role.dto';
 export class ClubRolesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private normalizeRoleName(value: string) {
+    return value
+      .toUpperCase()
+      .trim()
+      .replace(/[\s-]+/g, '_');
+  }
+
   async create(createClubRoleDto: CreateClubRoleDto) {
-    const roleName = createClubRoleDto.nom.toUpperCase().trim();
+    const roleName = this.normalizeRoleName(createClubRoleDto.nom);
+
+    if (roleName === 'RESPONSABLE_CLUB') {
+      throw new ConflictException(
+        'RESPONSABLE_CLUB est un rôle global et ne peut pas être créé comme rôle de club.',
+      );
+    }
 
     try {
       return await this.prisma.club_roles.create({
         data: {
           nom: roleName,
-          description: createClubRoleDto.description,
+          description: createClubRoleDto.description?.trim() ?? '',
+          is_active: true,
         },
       });
     } catch (error: unknown) {
@@ -35,7 +49,7 @@ export class ClubRolesService {
   }
 
   async findAll() {
-    return await this.prisma.club_roles.findMany({
+    const roles = await this.prisma.club_roles.findMany({
       include: {
         staff: {
           include: {
@@ -50,6 +64,8 @@ export class ClubRolesService {
       },
       orderBy: { nom: 'asc' },
     });
+
+    return roles;
   }
 
   async findOne(id: string) {
@@ -79,13 +95,25 @@ export class ClubRolesService {
   async update(id: string, updateClubRoleDto: UpdateClubRoleDto) {
     await this.findOne(id);
 
-    const roleName = updateClubRoleDto.nom?.toUpperCase().trim();
+    const roleName = updateClubRoleDto.nom
+      ? this.normalizeRoleName(updateClubRoleDto.nom)
+      : undefined;
+
+    if (roleName === 'RESPONSABLE_CLUB') {
+      throw new ConflictException(
+        'RESPONSABLE_CLUB est un rôle global et ne peut pas être utilisé comme rôle de club.',
+      );
+    }
+
     try {
       const updatedRole = await this.prisma.club_roles.update({
         where: { id },
         data: {
           nom: roleName,
-          description: updateClubRoleDto.description,
+          description:
+            updateClubRoleDto.description !== undefined
+              ? updateClubRoleDto.description?.trim() ?? ''
+              : undefined,
         },
       });
 
@@ -108,6 +136,32 @@ export class ClubRolesService {
       }
       throw error;
     }
+  }
+
+  async deactivate(id: string) {
+    const role = await this.findOne(id);
+
+    if (role.is_active === false) {
+      return role;
+    }
+
+    return await this.prisma.club_roles.update({
+      where: { id },
+      data: { is_active: false },
+    });
+  }
+
+  async reactivate(id: string) {
+    const role = await this.findOne(id);
+
+    if (role.is_active !== false) {
+      return role;
+    }
+
+    return await this.prisma.club_roles.update({
+      where: { id },
+      data: { is_active: true },
+    });
   }
 
   async remove(id: string) {

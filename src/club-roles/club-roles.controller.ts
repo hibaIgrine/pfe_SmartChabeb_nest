@@ -38,6 +38,16 @@ export class ClubRolesController {
     return this.clubRolesService.update(id, updateClubRoleDto);
   }
 
+  @Patch(':id/deactivate')
+  deactivate(@Param('id') id: string) {
+    return this.clubRolesService.deactivate(id);
+  }
+
+  @Patch(':id/reactivate')
+  reactivate(@Param('id') id: string) {
+    return this.clubRolesService.reactivate(id);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.clubRolesService.remove(id);

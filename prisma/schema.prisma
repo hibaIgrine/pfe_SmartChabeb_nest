@@ -101,6 +101,7 @@ model club_roles {
   id          String      @id @default(uuid()) @db.Uuid
   nom         String      @unique @db.VarChar(50)
   description String?     @db.Text
+  is_active   Boolean     @default(true)
   staff       club_staff[]
 }
 
