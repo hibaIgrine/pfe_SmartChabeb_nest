@@ -110,6 +110,7 @@ model club_staff {
   id_club        String       @db.Uuid
   id_utilisateur String       @db.Uuid
   role_dans_club String       @db.VarChar(50)
+  is_active      Boolean      @default(true)
   id_club_role   String?      @db.Uuid
   
   club           clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)

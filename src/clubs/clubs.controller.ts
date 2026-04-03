@@ -95,6 +95,20 @@ export class ClubsController {
     return await this.clubsService.addStaffToClub(clubId, body);
   }
 
+  @Patch(':id/staff/:staffId/deactivate')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE', 'RESPONSABLE_CLUB')
+  async deactivateStaff(@Param('id') clubId: string, @Param('staffId') staffId: string) {
+    return await this.clubsService.deactivateStaff(clubId, staffId);
+  }
+
+  @Patch(':id/staff/:staffId/reactivate')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE', 'RESPONSABLE_CLUB')
+  async reactivateStaff(@Param('id') clubId: string, @Param('staffId') staffId: string) {
+    return await this.clubsService.reactivateStaff(clubId, staffId);
+  }
+
   // 💡 4. Les routes avec paramètres génériques ':id' TOUJOURS EN DERNIER
   @Get(':id')
   findOne(@Param('id') id: string) {

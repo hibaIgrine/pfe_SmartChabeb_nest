@@ -278,6 +278,7 @@ export class ClubsService {
         data: {
           role_dans_club: roleName.toUpperCase(),
           id_club_role: clubRole.id,
+          is_active: true,
         },
       });
     }
@@ -288,7 +289,38 @@ export class ClubsService {
         id_utilisateur: data.id_utilisateur,
         role_dans_club: roleName.toUpperCase(),
         id_club_role: clubRole.id,
+        is_active: true,
       },
+    });
+  }
+
+  async deactivateStaff(clubId: string, staffId: string) {
+    const staff = await this.prisma.club_staff.findFirst({
+      where: { id: staffId, id_club: clubId },
+    });
+
+    if (!staff) {
+      throw new NotFoundException('Staff introuvable pour ce club.');
+    }
+
+    return await this.prisma.club_staff.update({
+      where: { id: staff.id },
+      data: { is_active: false } as any,
+    });
+  }
+
+  async reactivateStaff(clubId: string, staffId: string) {
+    const staff = await this.prisma.club_staff.findFirst({
+      where: { id: staffId, id_club: clubId },
+    });
+
+    if (!staff) {
+      throw new NotFoundException('Staff introuvable pour ce club.');
+    }
+
+    return await this.prisma.club_staff.update({
+      where: { id: staff.id },
+      data: { is_active: true } as any,
     });
   }
 
