@@ -18,9 +18,15 @@ export class RolesService {
           description: createRoleDto.description,
         },
       });
-    } catch (error) {
-      if (error.code === 'P2002')
+    } catch (error: unknown) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        (error as { code?: string }).code === 'P2002'
+      ) {
         throw new ConflictException('Ce rôle existe déjà dans le système.');
+      }
       throw error;
     }
   }
@@ -28,13 +34,13 @@ export class RolesService {
   // ==========================================
   // Lister les rôles avec les utilisateurs et leurs centres
   // ==========================================
+  // src/roles/roles.service.ts
   async findAll() {
     return await this.prisma.roles.findMany({
       include: {
         utilisateurs: {
           include: {
-            // 💡 id_salle -> id_centre et salles -> centre
-            centre: true,
+            centre: true, // 💡 Doit être identique au nom dans le modèle utilisateurs
           },
         },
       },

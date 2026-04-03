@@ -47,7 +47,7 @@ export class CentresController {
 
   @Patch(':id')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE')
   update(@Param('id') id: string, @Body() updateCentreDto: any) {
     return this.centresService.update(id, updateCentreDto);
   }

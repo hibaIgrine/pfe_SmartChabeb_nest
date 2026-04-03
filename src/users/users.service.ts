@@ -20,6 +20,9 @@ export class UsersService {
   // ==========================================
   async create(createUserDto: any) {
     try {
+      const roleObj = await this.prisma.roles.findUnique({
+        where: { nom: 'ADHERENT' },
+      });
       const salt = await bcrypt.genSalt();
       const hashedPassword = await bcrypt.hash(
         createUserDto.mot_de_passe,
@@ -34,6 +37,7 @@ export class UsersService {
           email: createUserDto.email.trim().toLowerCase(),
           mot_de_passe: hashedPassword,
           role: 'ADHERENT',
+          id_role: roleObj?.id,
           code_verification: vCode,
           est_verifie: false,
         },
@@ -56,14 +60,22 @@ export class UsersService {
             </div>
           `,
         });
-      } catch (mailError) {
-        console.error('❌ ERREUR ENVOI MAIL :', mailError.message);
+      } catch (mailError: unknown) {
+        const message =
+          mailError instanceof Error ? mailError.message : String(mailError);
+        console.error('❌ ERREUR ENVOI MAIL :', message);
       }
 
       return user;
-    } catch (error) {
-      if (error.code === 'P2002')
+    } catch (error: unknown) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        (error as { code?: string }).code === 'P2002'
+      ) {
         throw new ConflictException('Cet email est déjà utilisé.');
+      }
       throw error;
     }
   }
@@ -151,6 +163,9 @@ export class UsersService {
           include: {
             centre: true,
             inscriptions_clubs: { include: { club: true } },
+            clubs_diriges: {
+              select: { id: true, nom: true },
+            },
           },
           orderBy: { nom: 'asc' },
         });
@@ -163,6 +178,9 @@ export class UsersService {
             select: { id: true, nom: true, gouvernorat: true },
           },
           inscriptions_clubs: { include: { club: true } },
+          clubs_diriges: {
+            select: { id: true, nom: true },
+          },
         },
         orderBy: { nom: 'asc' },
       });
@@ -178,6 +196,9 @@ export class UsersService {
       include: {
         centre: true,
         inscriptions_clubs: { include: { club: true } },
+        clubs_diriges: {
+          select: { id: true, nom: true },
+        },
       },
     });
     if (!user) throw new NotFoundException('Utilisateur introuvable');
@@ -197,10 +218,21 @@ export class UsersService {
   }
 
   async updateStatus(id: string, data: any) {
-    if (data.role) data.role = data.role.toUpperCase().replace(/\s+/g, '_');
+    if (data.role) {
+      const roleName = data.role.toUpperCase().replace(/\s+/g, '_');
+      const roleObj = await this.prisma.roles.findUnique({
+        where: { nom: roleName },
+      });
+      data.role = roleName;
+      data.id_role = roleObj?.id; // 💡 On met à jour l'UUID en même temps que le texte
+    }
     return await this.prisma.utilisateurs.update({
       where: { id },
-      data,
+      data: data,
+      include: {
+        centre: true,
+        inscriptions_clubs: { include: { club: true } },
+      },
     });
   }
 
@@ -215,13 +247,15 @@ export class UsersService {
     return await this.prisma.utilisateurs.findMany({
       where: {
         id_centre,
-        role: { in: ['COACH', 'ANIMATEUR', 'RESPONSABLE_CLUB'] },
       },
-      select: { id: true, nom: true, prenom: true, role: true },
+      select: { id: true, nom: true, prenom: true, email: true, role: true },
     });
   }
 
   async remove(id: string) {
-    return await this.prisma.utilisateurs.delete({ where: { id } });
+    return await this.prisma.utilisateurs.update({
+      where: { id },
+      data: { compte_actif: false },
+    });
   }
 }

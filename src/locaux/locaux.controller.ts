@@ -8,6 +8,7 @@ import {
   Delete,
   UseGuards,
   Query,
+  Request,
 } from '@nestjs/common';
 import { LocauxService } from './locaux.service';
 import { CreateLocalDto } from './dto/create-local.dto';
@@ -19,17 +20,18 @@ import { Roles } from 'src/auth/roles.decorator';
 export class LocauxController {
   constructor(private readonly locauxService: LocauxService) {}
 
+  @Get()
+  @UseGuards(AuthGuard('jwt')) // 💡 On force la sécurité pour identifier le user
+  findAll(@Request() req: any, @Query('id_centre') id_centre?: string) {
+    // On envoie l'objet 'user' complet au service
+    return this.locauxService.findAll(req.user, id_centre);
+  }
+
   @Post()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN') // Seul l'admin crée des locaux
   create(@Body() dto: CreateLocalDto) {
     return this.locauxService.create(dto);
-  }
-
-  @Get()
-  // Accessible par tous (Mobile & Web) pour voir les salles dispo
-  findAll(@Query('id_centre') id_centre?: string) {
-    return this.locauxService.findAll(id_centre);
   }
 
   @Get(':id')

@@ -2,6 +2,7 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import * as fs from 'fs';
@@ -69,12 +70,33 @@ export class ClubsService {
       });
 
       if (data.staff && Array.isArray(data.staff)) {
+        const staffData = await Promise.all(
+          data.staff.map(async (s: any) => {
+            const roleName = (s.role_dans_club ?? '').toString().trim();
+            if (!roleName) {
+              throw new BadRequestException('Rôle club requis pour le staff.');
+            }
+
+            const clubRole = await tx.club_roles.upsert({
+              where: { nom: roleName.toUpperCase() },
+              update: { description: undefined },
+              create: {
+                nom: roleName.toUpperCase(),
+                description: `Rôle club ${roleName.toUpperCase()}`,
+              },
+            });
+
+            return {
+              id_club: nouveauClub.id,
+              id_utilisateur: s.id_utilisateur,
+              role_dans_club: roleName.toUpperCase(),
+              id_club_role: clubRole.id,
+            };
+          }),
+        );
+
         await tx.club_staff.createMany({
-          data: data.staff.map((s: any) => ({
-            id_club: nouveauClub.id,
-            id_utilisateur: s.id_utilisateur,
-            role_dans_club: s.role_dans_club,
-          })),
+          data: staffData,
         });
       }
       return nouveauClub;
@@ -108,33 +130,89 @@ export class ClubsService {
   }
 
   async findOne(id: string) {
+    if (!id || !/^[0-9a-fA-F-]{36}$/.test(id)) {
+      throw new BadRequestException('Identifiant de club invalide');
+    }
+
     const club = await this.prisma.clubs.findUnique({
       where: { id },
       include: {
-        centre: { select: { nom: true } }, // 💡 salles -> centre
-        responsable: { select: { nom: true, prenom: true } },
-        staff: {
-          include: {
-            utilisateur: { select: { id: true, nom: true, prenom: true } },
-          },
-        },
-        inscriptions: {
-          include: {
-            utilisateur: {
-              select: {
-                id: true,
-                nom: true,
-                prenom: true,
-                email: true,
-                photo_profil_url: true,
-              },
-            },
-          },
-        },
+        centre: { select: { id: true, nom: true } },
+        responsable: { select: { id: true, nom: true, prenom: true } },
       },
     });
+
     if (!club) throw new NotFoundException('Club introuvable');
-    return club;
+
+    const [staffRows, inscriptionRows] = await Promise.all([
+      this.prisma.club_staff.findMany({ where: { id_club: id } }),
+      this.prisma.inscriptions_clubs.findMany({
+        where: { id_club: id },
+        orderBy: { date_adhesion: 'desc' },
+      }),
+    ]);
+
+    const userIds = Array.from(
+      new Set([
+        ...staffRows.map((s) => s.id_utilisateur),
+        ...inscriptionRows.map((i) => i.id_utilisateur),
+      ]),
+    );
+
+    const users = userIds.length
+      ? await this.prisma.utilisateurs.findMany({
+          where: { id: { in: userIds } },
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            photo_profil_url: true,
+          },
+        })
+      : [];
+
+    const usersMap = new Map(users.map((user) => [user.id, user]));
+
+    const clubRoleIds = Array.from(
+      new Set(
+        staffRows
+          .map((item) => item.id_club_role)
+          .filter((roleId): roleId is string => Boolean(roleId)),
+      ),
+    );
+
+    const clubRoles = clubRoleIds.length
+      ? await this.prisma.club_roles.findMany({
+          where: { id: { in: clubRoleIds } },
+          select: { id: true, nom: true, description: true },
+        })
+      : [];
+
+    const clubRolesMap = new Map(clubRoles.map((role) => [role.id, role]));
+
+    const staff = staffRows
+      .map((item) => ({
+        ...item,
+        utilisateur: usersMap.get(item.id_utilisateur) ?? null,
+        club_role: item.id_club_role
+          ? (clubRolesMap.get(item.id_club_role) ?? null)
+          : null,
+      }))
+      .filter((item) => item.utilisateur !== null);
+
+    const inscriptions = inscriptionRows
+      .map((item) => ({
+        ...item,
+        utilisateur: usersMap.get(item.id_utilisateur) ?? null,
+      }))
+      .filter((item) => item.utilisateur !== null);
+
+    return {
+      ...club,
+      staff,
+      inscriptions,
+    };
   }
 
   async update(id: string, data: any) {
@@ -164,8 +242,72 @@ export class ClubsService {
     });
   }
 
+  async addStaffToClub(
+    clubId: string,
+    data: { id_utilisateur: string; role_dans_club: string },
+  ) {
+    const club = await this.prisma.clubs.findUnique({ where: { id: clubId } });
+    if (!club) throw new NotFoundException('Club introuvable');
+
+    const roleName = (data.role_dans_club ?? '').toString().trim();
+    if (!roleName) {
+      throw new BadRequestException('Rôle club requis.');
+    }
+
+    const clubRole = await this.prisma.club_roles.upsert({
+      where: { nom: roleName.toUpperCase() },
+      update: { description: undefined },
+      create: {
+        nom: roleName.toUpperCase(),
+        description: `Rôle club ${roleName.toUpperCase()}`,
+      },
+    });
+
+    const existingStaff = await this.prisma.club_staff.findUnique({
+      where: {
+        id_club_id_utilisateur: {
+          id_club: clubId,
+          id_utilisateur: data.id_utilisateur,
+        },
+      },
+    });
+
+    if (existingStaff) {
+      return await this.prisma.club_staff.update({
+        where: { id: existingStaff.id },
+        data: {
+          role_dans_club: roleName.toUpperCase(),
+          id_club_role: clubRole.id,
+        },
+      });
+    }
+
+    return await this.prisma.club_staff.create({
+      data: {
+        id_club: clubId,
+        id_utilisateur: data.id_utilisateur,
+        role_dans_club: roleName.toUpperCase(),
+        id_club_role: clubRole.id,
+      },
+    });
+  }
+
   async remove(id: string) {
-    return await this.prisma.clubs.delete({ where: { id } });
+    const club = await this.prisma.clubs.findUnique({ where: { id } });
+    if (!club) throw new NotFoundException('Club introuvable');
+    return await this.prisma.clubs.update({
+      where: { id },
+      data: { est_actif: false },
+    });
+  }
+
+  async activate(id: string) {
+    const club = await this.prisma.clubs.findUnique({ where: { id } });
+    if (!club) throw new NotFoundException('Club introuvable');
+    return await this.prisma.clubs.update({
+      where: { id },
+      data: { est_actif: true },
+    });
   }
 
   // ==========================================

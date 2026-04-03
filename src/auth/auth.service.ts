@@ -18,21 +18,29 @@ export class AuthService {
   ) {}
 
   async login(email: string, pass: string) {
-    const user = await this.prisma.utilisateurs.findUnique({ where: { email } });
-    if (!user) throw new UnauthorizedException("Utilisateur inconnu");
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { email },
+    });
+    if (!user) throw new UnauthorizedException('Utilisateur inconnu');
 
     const maintenant = new Date();
-    if (user.compte_actif === false && user.date_fin_ban) {
-      if (user.date_fin_ban > maintenant) {
-        throw new ForbiddenException(
-          `Compte suspendu jusqu'au ${user.date_fin_ban.toLocaleDateString()}. Motif: ${user.motif_ban}`,
-        );
-      } else {
-        // Auto-Unban lors du login
+    if (user.compte_actif === false) {
+      if (user.date_fin_ban) {
+        if (user.date_fin_ban > maintenant) {
+          throw new ForbiddenException(
+            `Votre compte est suspendu jusqu'au ${user.date_fin_ban.toLocaleDateString()}. Motif : ${user.motif_ban}`,
+          );
+        }
+
+        // Auto-Unban lors du login si la période de ban est terminée
         await this.prisma.utilisateurs.update({
           where: { id: user.id },
           data: { compte_actif: true, date_fin_ban: null, motif_ban: null },
         });
+      } else {
+        throw new ForbiddenException(
+          'Votre compte est désactivé. Veuillez vérifier avec l’administration.',
+        );
       }
     }
 
@@ -62,7 +70,9 @@ export class AuthService {
   }
 
   async forgotPassword(email: string) {
-    const user = await this.prisma.utilisateurs.findUnique({ where: { email } });
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { email },
+    });
     if (!user) throw new NotFoundException('Aucun compte lié à cet email');
 
     const resetToken = Math.floor(100000 + Math.random() * 900000).toString();
@@ -74,10 +84,11 @@ export class AuthService {
       data: { reset_token: resetToken, reset_token_expires: expires },
     });
 
-    this.mailerService.sendMail({
-      to: email,
-      subject: 'Réinitialisation de ton mot de passe SmartChabeb',
-      html: `
+    this.mailerService
+      .sendMail({
+        to: email,
+        subject: 'Réinitialisation de ton mot de passe SmartChabeb',
+        html: `
         <div style="font-family: sans-serif; padding: 20px; border: 2px solid #E98A7D; border-radius: 20px;">
           <h3 style="color: #436D75;">Demande de nouveau mot de passe</h3>
           <p>Voici ton code de réinitialisation (valide 1 heure) :</p>
@@ -87,20 +98,29 @@ export class AuthService {
           <p style="font-size: 12px; color: gray;">Si tu n'as pas fait cette demande, ignore ce mail.</p>
         </div>
       `,
-    }).catch(e => console.error("Erreur mail ForgotPwd"));
+      })
+      .catch((e) => console.error('Erreur mail ForgotPwd'));
 
     return { message: 'Code de réinitialisation envoyé par email.' };
   }
 
   async resetPassword(email: string, token: string, newPass: string) {
-    const user = await this.prisma.utilisateurs.findUnique({ where: { email } });
-    if (!user || user.reset_token !== token) throw new UnauthorizedException('Code invalide');
-    if (!user.reset_token_expires || user.reset_token_expires < new Date()) throw new UnauthorizedException('Code expiré');
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { email },
+    });
+    if (!user || user.reset_token !== token)
+      throw new UnauthorizedException('Code invalide');
+    if (!user.reset_token_expires || user.reset_token_expires < new Date())
+      throw new UnauthorizedException('Code expiré');
 
     const hashedPassword = await bcrypt.hash(newPass, await bcrypt.genSalt());
     await this.prisma.utilisateurs.update({
       where: { email },
-      data: { mot_de_passe: hashedPassword, reset_token: null, reset_token_expires: null },
+      data: {
+        mot_de_passe: hashedPassword,
+        reset_token: null,
+        reset_token_expires: null,
+      },
     });
 
     return { message: 'Mot de passe mis à jour ! Connecte-toi.' };

@@ -12,6 +12,7 @@ import { RolesModule } from './roles/roles.module';
 import { CentresModule } from './centres/centres.module';
 import { LocauxModule } from './locaux/locaux.module';
 import { ReservationsModule } from './reservations/reservations.module';
+import { ClubRolesModule } from './club-roles/club-roles.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { ReservationsModule } from './reservations/reservations.module';
     }),
     CentresModule,
     ClubsModule,
+    ClubRolesModule,
     RolesModule,
     LocauxModule,
     ReservationsModule,

@@ -92,13 +92,14 @@ export class CentresService {
   // ==========================================
   async remove(id: string) {
     try {
-      return await this.prisma.centres.delete({
+      return await this.prisma.centres.update({
         where: { id },
+        data: { est_actif: false },
       });
     } catch (error) {
-      if (error.code === 'P2003') {
-        throw new ConflictException(
-          "Erreur d'intégrité : vérifiez les dépendances du centre.",
+      if (error.code === 'P2025') {
+        throw new NotFoundException(
+          'Impossible de désactiver : centre introuvable.',
         );
       }
       throw error;

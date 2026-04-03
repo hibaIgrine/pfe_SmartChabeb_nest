@@ -84,10 +84,26 @@ export class ClubsController {
   async leaveClub(@Param('id') clubId: string, @Request() req: any) {
     return await this.clubsService.leaveClub(req.user.userId, clubId);
   }
+
+  @Post(':id/staff')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE', 'RESPONSABLE_CLUB')
+  async addStaffToClub(
+    @Param('id') clubId: string,
+    @Body() body: { id_utilisateur: string; role_dans_club: string },
+  ) {
+    return await this.clubsService.addStaffToClub(clubId, body);
+  }
+
   // 💡 4. Les routes avec paramètres génériques ':id' TOUJOURS EN DERNIER
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.clubsService.findOne(id);
+  }
+
+  @Patch(':id/activate')
+  activate(@Param('id') id: string) {
+    return this.clubsService.activate(id);
   }
 
   @Patch(':id')

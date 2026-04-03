@@ -12,11 +12,19 @@ export class LocauxService {
     });
   }
 
-  async findAll(id_centre?: string) {
+  async findAll(user: any, queryIdCentre?: string) {
+    let idToFilter = queryIdCentre;
+
+    // 🛡️ SÉCURITÉ : Si l'utilisateur n'est pas ADMIN
+    if (user.role !== 'ADMIN') {
+      // On ignore le filtre demandé et on force son propre centre
+      idToFilter = user.id_centre;
+    }
+
     return await this.prisma.locaux.findMany({
-      where: id_centre ? { id_centre } : {},
+      where: idToFilter ? { id_centre: idToFilter } : {},
       include: {
-        centre: { select: { nom: true } },
+        centre: { select: { nom: true, gouvernorat: true } },
         _count: { select: { reservations: true } },
       },
       orderBy: { nom: 'asc' },
