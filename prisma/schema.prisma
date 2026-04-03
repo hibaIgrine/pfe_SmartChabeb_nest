@@ -48,6 +48,7 @@ model utilisateurs {
   inscriptions_clubs  inscriptions_clubs[]
   staff_dans_clubs    club_staff[]
   reservations        reservations_locaux[]
+  notifications       notifications[]
 }
 
 // ==========================================
@@ -199,4 +200,22 @@ model reservations_locaux {
   utilisateur     utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
   id_local        String       @db.Uuid
   local           locaux       @relation(fields: [id_local], references: [id], onDelete: Cascade)
+}
+
+// ==========================================
+// 5. MODULE NOTIFICATIONS
+// ==========================================
+
+model notifications {
+  id              String    @id @default(uuid()) @db.Uuid
+  titre           String    @db.VarChar(255)
+  message         String    @db.Text
+  type            String    @db.VarChar(50) // ADHESION_ACCEPTED, ADHESION_REJECTED, etc.
+  is_read         Boolean   @default(false)
+  data            Json?     // Données additionnelles (id_club, id_inscription, etc.)
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  id_utilisateur  String       @db.Uuid
+  utilisateur     utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 }

@@ -14,6 +14,8 @@ import { LocauxModule } from './locaux/locaux.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { ClubRolesModule } from './club-roles/club-roles.module';
 
+import { NotificationsModule } from './notifications/notifications.module';
+
 @Module({
   imports: [
     // 1. Charger les variables d'environnement
@@ -46,6 +48,7 @@ import { ClubRolesModule } from './club-roles/club-roles.module';
     CentresModule,
     ClubsModule,
     ClubRolesModule,
+    NotificationsModule,
     RolesModule,
     LocauxModule,
     ReservationsModule,

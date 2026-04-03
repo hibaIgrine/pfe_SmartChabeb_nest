@@ -5,12 +5,16 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { NotificationsService } from 'src/notifications/notifications.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
 @Injectable()
 export class ClubsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   // ==========================================
   // UTILS : Gestion des Images
@@ -398,29 +402,33 @@ export class ClubsService {
     statut: string,
     responsableId: string,
   ) {
-    if (statut === 'ACCEPTE') {
-      const ins = await this.prisma.inscriptions_clubs.findUnique({
-        where: { id: inscriptionId },
-        include: {
-          club: {
-            include: {
-              _count: {
-                select: { inscriptions: { where: { statut: 'ACCEPTE' } } },
-              },
+    const inscription = await this.prisma.inscriptions_clubs.findUnique({
+      where: { id: inscriptionId },
+      include: {
+        club: {
+          include: {
+            _count: {
+              select: { inscriptions: { where: { statut: 'ACCEPTE' } } },
             },
           },
         },
-      });
+      },
+    });
 
+    if (!inscription) {
+      throw new NotFoundException('Inscription introuvable.');
+    }
+
+    if (statut === 'ACCEPTE') {
       if (
-        ins?.club.capacite &&
-        ins.club._count.inscriptions >= ins.club.capacite
+        inscription.club.capacite &&
+        inscription.club._count.inscriptions >= inscription.club.capacite
       ) {
         throw new ConflictException('Capacité maximale atteinte.');
       }
     }
 
-    return await this.prisma.inscriptions_clubs.update({
+    const updatedInscription = await this.prisma.inscriptions_clubs.update({
       where: { id: inscriptionId },
       data: {
         statut,
@@ -428,6 +436,23 @@ export class ClubsService {
         responsable_id: responsableId,
       },
     });
+
+    if (statut === 'ACCEPTE' || statut === 'REFUSE') {
+      try {
+        await this.notificationsService.createMembershipDecisionNotification({
+          utilisateurId: inscription.id_utilisateur,
+          clubId: inscription.id_club,
+          clubNom: inscription.club.nom,
+          inscriptionId: inscription.id,
+          statut,
+          responsableId,
+        });
+      } catch (err) {
+        console.error('Erreur creation notification adhesion :', err);
+      }
+    }
+
+    return updatedInscription;
   }
 
   async removeInscription(id: string) {
