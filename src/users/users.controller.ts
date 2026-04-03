@@ -111,6 +111,12 @@ export class UsersController {
     return await this.usersService.findStaffByCentre(id_centre);
   }
 
+  @Get('adherents-by-centre/:id_centre')
+  @UseGuards(AuthGuard('jwt'))
+  async getAdherentsByCentre(@Param('id_centre') id_centre: string) {
+    return await this.usersService.findAdherentsByCentre(id_centre);
+  }
+
   @Get()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN', 'COACH', 'GESTIONNAIRE')

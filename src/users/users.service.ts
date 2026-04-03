@@ -252,6 +252,17 @@ export class UsersService {
     });
   }
 
+  async findAdherentsByCentre(id_centre: string) {
+    return await this.prisma.utilisateurs.findMany({
+      where: {
+        id_centre,
+        role: 'ADHERENT',
+      },
+      select: { id: true, nom: true, prenom: true, email: true, role: true },
+      orderBy: { nom: 'asc' },
+    });
+  }
+
   async remove(id: string) {
     return await this.prisma.utilisateurs.update({
       where: { id },
