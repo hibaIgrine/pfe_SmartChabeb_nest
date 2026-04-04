@@ -37,6 +37,23 @@ export class EventsController {
     return this.eventsService.findAll(req.user.userId, include);
   }
 
+  @Get('availability/check')
+  checkAvailability(
+    @Query('id_local') localId: string,
+    @Query('date') date: string,
+    @Query('start') start: string,
+    @Query('end') end: string,
+    @Query('excludeEventId') excludeEventId?: string,
+  ) {
+    return this.eventsService.checkLocalAvailability(
+      localId,
+      date,
+      start,
+      end,
+      excludeEventId,
+    );
+  }
+
   @Get(':id')
   findOne(@Request() req: any, @Param('id') id: string) {
     return this.eventsService.findOne(req.user.userId, id);

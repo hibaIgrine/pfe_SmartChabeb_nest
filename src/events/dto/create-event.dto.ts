@@ -6,6 +6,7 @@ import {
   IsUUID,
   Matches,
   Min,
+  IsIn,
 } from 'class-validator';
 
 export class CreateEventDto {
@@ -44,4 +45,19 @@ export class CreateEventDto {
   @IsInt()
   @Min(1)
   capacity?: number;
+
+  @IsOptional()
+  @IsIn(['NONE', 'DAILY', 'WEEKLY', 'MONTHLY'])
+  recurrence_type?: 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY';
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  recurrence_count?: number;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'recurrence_until doit respecter le format YYYY-MM-DD',
+  })
+  recurrence_until?: string;
 }

@@ -13,6 +13,113 @@ import { UpdateEventDto } from './dto/update-event.dto';
 export class EventsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private addDays(baseDate: Date, days: number) {
+    const copy = new Date(baseDate);
+    copy.setDate(copy.getDate() + days);
+    return copy;
+  }
+
+  private addMonths(baseDate: Date, months: number) {
+    const copy = new Date(baseDate);
+    copy.setMonth(copy.getMonth() + months);
+    return copy;
+  }
+
+  private normalizeDateOnly(dateValue: Date) {
+    const dateStr = dateValue.toISOString().split('T')[0];
+    return new Date(`${dateStr}T00:00:00`);
+  }
+
+  private buildOccurrenceDates(
+    baseDate: Date,
+    recurrenceType?: 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY',
+    recurrenceCount?: number,
+    recurrenceUntil?: string,
+  ) {
+    const type = recurrenceType ?? 'NONE';
+    if (type === 'NONE') {
+      return [this.normalizeDateOnly(baseDate)];
+    }
+
+    const maxCount = Math.min(Math.max(recurrenceCount ?? 1, 1), 52);
+    const untilDate = recurrenceUntil
+      ? this.normalizeDateOnly(new Date(`${recurrenceUntil}T00:00:00`))
+      : null;
+
+    if (untilDate && untilDate < this.normalizeDateOnly(baseDate)) {
+      throw new BadRequestException(
+        'recurrence_until doit etre superieur ou egal a date_event',
+      );
+    }
+
+    const occurrences: Date[] = [];
+    for (let i = 0; i < maxCount; i++) {
+      const current =
+        type === 'DAILY'
+          ? this.addDays(baseDate, i)
+          : type === 'WEEKLY'
+            ? this.addDays(baseDate, i * 7)
+            : this.addMonths(baseDate, i);
+
+      const normalizedCurrent = this.normalizeDateOnly(current);
+      if (untilDate && normalizedCurrent > untilDate) {
+        break;
+      }
+      occurrences.push(normalizedCurrent);
+    }
+
+    if (occurrences.length === 0) {
+      throw new BadRequestException('Aucune occurrence valide generee');
+    }
+
+    return occurrences;
+  }
+
+  private buildTimeOnDate(date: Date, time: string) {
+    const datePart = date.toISOString().split('T')[0];
+    const normalizedTime = time.length === 5 ? `${time}:00` : time;
+    return new Date(`${datePart}T${normalizedTime}`);
+  }
+
+  private async findConflicts(
+    localId: string,
+    dateEvent: Date,
+    startDateTime: Date,
+    endDateTime: Date,
+    excludeEventId?: string,
+  ) {
+    return this.prisma.events.findMany({
+      where: {
+        locaux_id: localId,
+        is_active: true,
+        date_event: dateEvent,
+        ...(excludeEventId ? { id: { not: excludeEventId } } : {}),
+        OR: [
+          {
+            start_time: { lte: startDateTime },
+            end_time: { gt: startDateTime },
+          },
+          {
+            start_time: { lt: endDateTime },
+            end_time: { gte: endDateTime },
+          },
+          {
+            start_time: { gte: startDateTime },
+            end_time: { lte: endDateTime },
+          },
+        ],
+      },
+      select: {
+        id: true,
+        nom: true,
+        date_event: true,
+        start_time: true,
+        end_time: true,
+      },
+      orderBy: { start_time: 'asc' },
+    });
+  }
+
   private async resolveRequester(userId: string) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { id: userId },
@@ -166,23 +273,74 @@ export class EventsService {
       dto.end_time,
     );
 
-    return this.prisma.events.create({
-      data: {
-        nom: dto.nom,
-        description: dto.description,
-        date_event: eventDate,
-        start_time: startDateTime,
-        end_time: endDateTime,
-        capacity: dto.capacity,
-        club_id: dto.club_id,
-        locaux_id: dto.locaux_id,
-        created_by: userId,
-      },
-      include: {
-        club: { select: { id: true, nom: true, id_centre: true } },
-        local: { select: { id: true, nom: true, id_centre: true } },
-      },
-    });
+    const occurrenceDates = this.buildOccurrenceDates(
+      eventDate,
+      dto.recurrence_type,
+      dto.recurrence_count,
+      dto.recurrence_until,
+    );
+
+    const conflictsSummary: string[] = [];
+    for (const occurrenceDate of occurrenceDates) {
+      const occurrenceStart = this.buildTimeOnDate(
+        occurrenceDate,
+        dto.start_time,
+      );
+      const occurrenceEnd = this.buildTimeOnDate(occurrenceDate, dto.end_time);
+      const conflicts = await this.findConflicts(
+        dto.locaux_id,
+        occurrenceDate,
+        occurrenceStart,
+        occurrenceEnd,
+      );
+
+      if (conflicts.length > 0) {
+        conflictsSummary.push(occurrenceDate.toISOString().split('T')[0]);
+      }
+    }
+
+    if (conflictsSummary.length > 0) {
+      throw new BadRequestException(
+        `Conflit de planning sur les dates: ${conflictsSummary.join(', ')}`,
+      );
+    }
+
+    const createdEvents = await this.prisma.$transaction(
+      occurrenceDates.map((occurrenceDate) => {
+        const occurrenceStart = this.buildTimeOnDate(
+          occurrenceDate,
+          dto.start_time,
+        );
+        const occurrenceEnd = this.buildTimeOnDate(
+          occurrenceDate,
+          dto.end_time,
+        );
+
+        return this.prisma.events.create({
+          data: {
+            nom: dto.nom,
+            description: dto.description,
+            date_event: occurrenceDate,
+            start_time: occurrenceStart,
+            end_time: occurrenceEnd,
+            capacity: dto.capacity,
+            club_id: dto.club_id,
+            locaux_id: dto.locaux_id,
+            created_by: userId,
+          },
+          include: {
+            club: { select: { id: true, nom: true, id_centre: true } },
+            local: { select: { id: true, nom: true, id_centre: true } },
+          },
+        });
+      }),
+    );
+
+    return {
+      createdCount: createdEvents.length,
+      recurrenceType: dto.recurrence_type ?? 'NONE',
+      events: createdEvents,
+    };
   }
 
   async findAll(userId: string, includeInactive = false) {
@@ -302,6 +460,20 @@ export class EventsService {
       endTime,
     );
 
+    const conflicts = await this.findConflicts(
+      nextLocalId,
+      eventDate,
+      startDateTime,
+      endDateTime,
+      eventId,
+    );
+
+    if (conflicts.length > 0) {
+      throw new BadRequestException(
+        'Conflit de planning: le local est deja reserve sur ce creneau',
+      );
+    }
+
     return this.prisma.events.update({
       where: { id: eventId },
       data: {
@@ -350,5 +522,41 @@ export class EventsService {
         local: { select: { id: true, nom: true } },
       },
     });
+  }
+
+  async checkLocalAvailability(
+    localId: string,
+    date: string,
+    start: string,
+    end: string,
+    excludeEventId?: string,
+  ) {
+    if (!localId || !date || !start || !end) {
+      throw new BadRequestException(
+        'id_local, date, start et end sont obligatoires',
+      );
+    }
+
+    const { eventDate, startDateTime, endDateTime } = this.buildDateTimes(
+      date,
+      start,
+      end,
+    );
+
+    const conflicts = await this.findConflicts(
+      localId,
+      eventDate,
+      startDateTime,
+      endDateTime,
+      excludeEventId,
+    );
+
+    return {
+      available: conflicts.length === 0,
+      conflicts,
+      durationMinutes: Math.floor(
+        (endDateTime.getTime() - startDateTime.getTime()) / 60000,
+      ),
+    };
   }
 }
