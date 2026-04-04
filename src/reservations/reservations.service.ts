@@ -5,6 +5,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { CreateReservationDto } from './dto/create-reservation.dto';
@@ -35,6 +36,55 @@ export class ReservationsService {
         'heure_fin doit etre strictement superieure a heure_debut',
       );
     }
+  }
+
+  private async buildReservationScopeWhere(
+    userId: string,
+    role?: string,
+  ): Promise<Prisma.reservations_locauxWhereInput> {
+    if (role === 'ADMIN') {
+      return {};
+    }
+
+    if (role === 'RESPONSABLE_CENTRE') {
+      const requester = await this.prisma.utilisateurs.findUnique({
+        where: { id: userId },
+        select: { id_centre: true },
+      });
+
+      if (!requester?.id_centre) {
+        return { id: { in: [] } };
+      }
+
+      return {
+        local: {
+          id_centre: requester.id_centre,
+        },
+      };
+    }
+
+    if (role === 'RESPONSABLE_CLUB') {
+      const clubs = await this.prisma.clubs.findMany({
+        where: { id_coach: userId, est_actif: true },
+        select: { id_centre: true },
+      });
+
+      const centreIds = [...new Set(clubs.map((c) => c.id_centre))].filter(
+        Boolean,
+      );
+
+      if (centreIds.length === 0) {
+        return { id: { in: [] } };
+      }
+
+      return {
+        local: {
+          id_centre: { in: centreIds },
+        },
+      };
+    }
+
+    return { id_utilisateur: userId };
   }
 
   private async assertResponsableCanReserveLocal(
@@ -314,6 +364,144 @@ export class ReservationsService {
       },
       orderBy: [{ date_reservation: 'asc' }, { heure_debut: 'asc' }],
     });
+  }
+
+  async getReservationStatsOverview(userId: string, role?: string) {
+    const baseWhere = await this.buildReservationScopeWhere(userId, role);
+
+    const [allReservations, validReservations, scopedLocauxCount] =
+      await Promise.all([
+        this.prisma.reservations_locaux.findMany({
+          where: {
+            ...baseWhere,
+            statut: { not: 'ANNULEE' },
+          },
+          select: {
+            id: true,
+            statut: true,
+            prix_total: true,
+            date_reservation: true,
+            heure_debut: true,
+            heure_fin: true,
+            id_local: true,
+            local: { select: { nom: true } },
+          },
+        }),
+        this.prisma.reservations_locaux.findMany({
+          where: {
+            ...baseWhere,
+            statut: 'VALIDEE',
+          },
+          select: {
+            id: true,
+            prix_total: true,
+            date_reservation: true,
+            heure_debut: true,
+            heure_fin: true,
+            id_local: true,
+            local: { select: { nom: true } },
+          },
+        }),
+        this.prisma.locaux.count({
+          where:
+            role === 'ADMIN'
+              ? {}
+              : role === 'RESPONSABLE_CENTRE'
+                ? {
+                    centre: {
+                      utilisateurs: {
+                        some: { id: userId },
+                      },
+                    },
+                  }
+                : role === 'RESPONSABLE_CLUB'
+                  ? {
+                      centre: {
+                        clubs: {
+                          some: {
+                            id_coach: userId,
+                            est_actif: true,
+                          },
+                        },
+                      },
+                    }
+                  : {
+                      reservations: {
+                        some: { id_utilisateur: userId },
+                      },
+                    },
+        }),
+      ]);
+
+    const reservationCount = allReservations.length;
+
+    const revenueTotal = validReservations.reduce((sum, reservation) => {
+      const amount = reservation.prix_total
+        ? Number(reservation.prix_total)
+        : 0;
+      return sum + amount;
+    }, 0);
+
+    const usedRoomsMap = new Map<string, { roomName: string; count: number }>();
+    for (const reservation of validReservations) {
+      const key = reservation.id_local;
+      const roomName = reservation.local?.nom ?? 'Local inconnu';
+      const current = usedRoomsMap.get(key);
+      usedRoomsMap.set(key, {
+        roomName,
+        count: (current?.count ?? 0) + 1,
+      });
+    }
+
+    const mostUsedRoom = [...usedRoomsMap.values()].sort(
+      (a, b) => b.count - a.count,
+    )[0] ?? { roomName: 'Aucune salle', count: 0 };
+
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const monthEnd = new Date(
+      monthStart.getFullYear(),
+      monthStart.getMonth() + 1,
+      0,
+    );
+    monthEnd.setHours(23, 59, 59, 999);
+
+    const monthlyValidReservations = validReservations.filter((r) => {
+      const date = new Date(r.date_reservation);
+      return date >= monthStart && date <= monthEnd;
+    });
+
+    const occupiedHours = monthlyValidReservations.reduce(
+      (sum, reservation) => {
+        const durationMs =
+          reservation.heure_fin.getTime() - reservation.heure_debut.getTime();
+        return sum + durationMs / (1000 * 60 * 60);
+      },
+      0,
+    );
+
+    const daysInMonth = monthEnd.getDate();
+    const dailyOpenHours = 14;
+    const availableHours = Math.max(
+      1,
+      scopedLocauxCount * daysInMonth * dailyOpenHours,
+    );
+    const occupancyRate = Number(
+      Math.min(100, (occupiedHours / availableHours) * 100).toFixed(2),
+    );
+
+    return {
+      reservationCount,
+      mostUsedRoom,
+      occupancyRate,
+      revenueTotal: Number(revenueTotal.toFixed(2)),
+      monthContext: {
+        month: monthStart.getMonth() + 1,
+        year: monthStart.getFullYear(),
+        localsCount: scopedLocauxCount,
+      },
+    };
   }
 
   /**

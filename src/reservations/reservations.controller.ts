@@ -39,6 +39,15 @@ export class ReservationsController {
   async getPlanning(@Param('localId') localId: string) {
     return await this.resService.getLocalPlanning(localId);
   }
+
+  @Get('stats/overview')
+  async getStatsOverview(@Request() req) {
+    return await this.resService.getReservationStatsOverview(
+      req.user.userId,
+      req.user.role,
+    );
+  }
+
   @Get('check')
   async check(@Query() q: any) {
     const isFree = await this.resService.checkAvailability(
