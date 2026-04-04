@@ -6,11 +6,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { NotificationsService } from 'src/notifications/notifications.service';
 import { CreateReservationDto } from './dto/create-reservation.dto';
 
 @Injectable()
 export class ReservationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private async resolveUserOrFail(userId: string) {
     const user = await this.prisma.utilisateurs.findUnique({
@@ -189,6 +193,9 @@ export class ReservationsService {
   ) {
     const resToUpdate = await this.prisma.reservations_locaux.findUnique({
       where: { id },
+      include: {
+        local: { select: { id: true, nom: true } },
+      },
     });
 
     if (!resToUpdate) throw new NotFoundException('Réservation introuvable');
@@ -238,10 +245,30 @@ export class ReservationsService {
       }
     }
 
-    return await this.prisma.reservations_locaux.update({
+    const updated = await this.prisma.reservations_locaux.update({
       where: { id },
       data: { statut: normalizedStatus },
     });
+
+    if (normalizedStatus === 'VALIDEE' || normalizedStatus === 'REFUSEE') {
+      try {
+        await this.notificationsService.createReservationDecisionNotification({
+          utilisateurId: updated.id_utilisateur,
+          reservationId: updated.id,
+          localId: updated.id_local,
+          localNom: resToUpdate.local?.nom ?? 'local',
+          dateReservation: updated.date_reservation,
+          heureDebut: updated.heure_debut,
+          heureFin: updated.heure_fin,
+          statut: normalizedStatus,
+          adminId: requesterId,
+        });
+      } catch (err) {
+        console.error('Erreur creation notification reservation :', err);
+      }
+    }
+
+    return updated;
   }
 
   /**
@@ -252,10 +279,40 @@ export class ReservationsService {
       where: {
         id_local: localId,
         date_reservation: new Date(date),
-        statut: { in: ['EN_ATTENTE', 'VALIDEE'] },
+        statut: 'VALIDEE',
       },
       select: { heure_debut: true, heure_fin: true, objet: true },
       orderBy: { heure_debut: 'asc' },
+    });
+  }
+
+  /**
+   * 📅 PLANNING D'UN LOCAL
+   * Retourne uniquement les réservations validées pour afficher le calendrier.
+   */
+  async getLocalPlanning(localId: string) {
+    return await this.prisma.reservations_locaux.findMany({
+      where: {
+        id_local: localId,
+        statut: 'VALIDEE',
+      },
+      include: {
+        utilisateur: {
+          select: { nom: true, prenom: true, email: true },
+        },
+        local: {
+          select: {
+            id: true,
+            nom: true,
+            type: true,
+            prix_heure: true,
+            centre: {
+              select: { id: true, nom: true },
+            },
+          },
+        },
+      },
+      orderBy: [{ date_reservation: 'asc' }, { heure_debut: 'asc' }],
     });
   }
 
