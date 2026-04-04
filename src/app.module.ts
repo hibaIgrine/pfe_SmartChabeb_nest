@@ -13,6 +13,7 @@ import { CentresModule } from './centres/centres.module';
 import { LocauxModule } from './locaux/locaux.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { ClubRolesModule } from './club-roles/club-roles.module';
+import { PresencesModule } from './presences/presences.module';
 
 import { NotificationsModule } from './notifications/notifications.module';
 
@@ -52,6 +53,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     RolesModule,
     LocauxModule,
     ReservationsModule,
+    PresencesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

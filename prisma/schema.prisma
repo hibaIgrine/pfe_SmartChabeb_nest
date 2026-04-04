@@ -49,6 +49,8 @@ model utilisateurs {
   staff_dans_clubs    club_staff[]
   reservations        reservations_locaux[]
   notifications       notifications[]
+  presences_club      presences_clubs[]      @relation("presence_membre")
+  presences_marquees  presences_clubs[]      @relation("presence_responsable")
 }
 
 // ==========================================
@@ -96,6 +98,7 @@ model clubs {
   
   staff        club_staff[]
   inscriptions inscriptions_clubs[]
+  presences    presences_clubs[]
 }
 
 model club_roles {
@@ -138,6 +141,26 @@ model inscriptions_clubs {
   utilisateur         utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
 
   @@unique([id_utilisateur, id_club])
+}
+
+model presences_clubs {
+  id             String       @id @default(uuid()) @db.Uuid
+  id_club        String       @db.Uuid
+  id_utilisateur String       @db.Uuid
+  id_responsable String       @db.Uuid
+  date_presence  DateTime     @db.Date
+  statut         String       @db.VarChar(10)
+  remarque       String?      @db.VarChar(255)
+  created_at     DateTime     @default(now())
+  updated_at     DateTime     @updatedAt
+
+  club           clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)
+  membre         utilisateurs @relation("presence_membre", fields: [id_utilisateur], references: [id], onDelete: Cascade)
+  responsable    utilisateurs @relation("presence_responsable", fields: [id_responsable], references: [id], onDelete: Restrict)
+
+  @@unique([id_club, id_utilisateur, date_presence])
+  @@index([id_club, date_presence])
+  @@index([id_utilisateur, date_presence])
 }
 
 // ==========================================
