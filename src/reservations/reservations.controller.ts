@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ReservationsService } from './reservations.service';
 import { AuthGuard } from '@nestjs/passport';
+import { CreateReservationDto } from './dto/create-reservation.dto';
 
 @Controller('reservations')
 @UseGuards(AuthGuard('jwt'))
@@ -18,7 +19,7 @@ export class ReservationsController {
   constructor(private readonly resService: ReservationsService) {}
 
   @Post()
-  create(@Request() req, @Body() dto: any) {
+  create(@Request() req, @Body() dto: CreateReservationDto) {
     return this.resService.create(req.user.userId, dto);
   }
 
@@ -45,7 +46,30 @@ export class ReservationsController {
   }
 
   @Patch(':id/status')
-  updateStatus(@Param('id') id: string, @Body('statut') statut: string) {
-    return this.resService.updateStatus(id, statut);
+  updateStatus(
+    @Request() req,
+    @Param('id') id: string,
+    @Body('statut') statut: string,
+  ) {
+    return this.resService.updateStatus(
+      id,
+      statut,
+      req.user.userId,
+      req.user.role,
+    );
+  }
+
+  @Patch(':id')
+  update(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() dto: CreateReservationDto,
+  ) {
+    return this.resService.update(req.user.userId, id, dto);
+  }
+
+  @Patch(':id/cancel')
+  cancel(@Request() req, @Param('id') id: string) {
+    return this.resService.cancel(req.user.userId, id);
   }
 }

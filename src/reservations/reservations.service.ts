@@ -1,13 +1,63 @@
 import {
+  BadRequestException,
+  ForbiddenException,
   Injectable,
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { CreateReservationDto } from './dto/create-reservation.dto';
 
 @Injectable()
 export class ReservationsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private async resolveUserOrFail(userId: string) {
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    return user;
+  }
+
+  private ensureTimeRange(startDateTime: Date, endDateTime: Date) {
+    if (endDateTime <= startDateTime) {
+      throw new BadRequestException(
+        'heure_fin doit etre strictement superieure a heure_debut',
+      );
+    }
+  }
+
+  private async assertResponsableCanReserveLocal(
+    userId: string,
+    localId: string,
+  ): Promise<void> {
+    const managedClub = await this.prisma.clubs.findFirst({
+      where: {
+        id_coach: userId,
+        est_actif: true,
+        centre: {
+          locaux: {
+            some: {
+              id: localId,
+            },
+          },
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!managedClub) {
+      throw new ForbiddenException(
+        'Vous ne pouvez reserver que les locaux du centre de vos clubs',
+      );
+    }
+  }
 
   /**
    * 🛡️ ALGORITHME ANTI-CONFLIT
@@ -58,7 +108,13 @@ export class ReservationsService {
   /**
    * 📝 CRÉER UNE RÉSERVATION
    */
-  async create(userId: string, dto: any) {
+  async create(userId: string, dto: CreateReservationDto) {
+    const user = await this.resolveUserOrFail(userId);
+
+    if (user.role === 'RESPONSABLE_CLUB') {
+      await this.assertResponsableCanReserveLocal(userId, dto.id_local);
+    }
+
     const isAvailable = await this.checkAvailability(
       dto.id_local,
       dto.date_reservation,
@@ -78,9 +134,11 @@ export class ReservationsService {
 
     if (!local) throw new NotFoundException("Le local spécifié n'existe pas.");
 
-    // Calcul du prix
     const hDebut = new Date(`${dto.date_reservation}T${dto.heure_debut}`);
     const hFin = new Date(`${dto.date_reservation}T${dto.heure_fin}`);
+    this.ensureTimeRange(hDebut, hFin);
+
+    // Calcul du prix
     const dureeHeures = (hFin.getTime() - hDebut.getTime()) / (1000 * 60 * 60);
     const prixTotal = local.prix_heure
       ? Number(local.prix_heure) * dureeHeures
@@ -123,14 +181,43 @@ export class ReservationsService {
   /**
    * ✅ VALIDER / REFUSER (Admin)
    */
-  async updateStatus(id: string, statut: string) {
+  async updateStatus(
+    id: string,
+    statut: string,
+    requesterId: string,
+    requesterRole: string,
+  ) {
     const resToUpdate = await this.prisma.reservations_locaux.findUnique({
       where: { id },
     });
 
     if (!resToUpdate) throw new NotFoundException('Réservation introuvable');
 
-    if (statut === 'VALIDEE') {
+    const normalizedStatus = (statut ?? '').toUpperCase();
+    if (
+      !['EN_ATTENTE', 'VALIDEE', 'REFUSEE', 'ANNULEE'].includes(
+        normalizedStatus,
+      )
+    ) {
+      throw new BadRequestException(
+        'statut doit etre EN_ATTENTE, VALIDEE, REFUSEE ou ANNULEE',
+      );
+    }
+
+    await this.resolveUserOrFail(requesterId);
+
+    if (normalizedStatus === 'ANNULEE') {
+      const isOwner = resToUpdate.id_utilisateur === requesterId;
+      if (!isOwner && requesterRole !== 'ADMIN') {
+        throw new ForbiddenException(
+          'Vous ne pouvez annuler que vos propres reservations',
+        );
+      }
+    } else if (requesterRole !== 'ADMIN') {
+      throw new ForbiddenException('Seul l admin peut modifier le statut');
+    }
+
+    if (normalizedStatus === 'VALIDEE') {
       // On convertit les Date de la BDD en string pour l'algo de check
       const dateStr = resToUpdate.date_reservation.toISOString().split('T')[0];
       const startStr = resToUpdate.heure_debut.toTimeString().split(' ')[0];
@@ -153,7 +240,7 @@ export class ReservationsService {
 
     return await this.prisma.reservations_locaux.update({
       where: { id },
-      data: { statut },
+      data: { statut: normalizedStatus },
     });
   }
 
@@ -175,7 +262,28 @@ export class ReservationsService {
   /**
    * 🔄 MODIFIER UNE RÉSERVATION (User)
    */
-  async update(id: string, dto: any) {
+  async update(userId: string, id: string, dto: CreateReservationDto) {
+    const existing = await this.prisma.reservations_locaux.findUnique({
+      where: { id },
+      select: { id: true, id_utilisateur: true, statut: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Reservation introuvable');
+    }
+
+    const user = await this.resolveUserOrFail(userId);
+    const isOwner = existing.id_utilisateur === userId;
+    if (!isOwner && user.role !== 'ADMIN') {
+      throw new ForbiddenException(
+        'Vous ne pouvez modifier que vos propres reservations',
+      );
+    }
+
+    if (user.role === 'RESPONSABLE_CLUB') {
+      await this.assertResponsableCanReserveLocal(userId, dto.id_local);
+    }
+
     const isAvailable = await this.checkAvailability(
       dto.id_local,
       dto.date_reservation,
@@ -193,9 +301,11 @@ export class ReservationsService {
     });
     if (!local) throw new NotFoundException('Local introuvable');
 
-    // Recalcul du prix en cas de changement d'heures
     const hDebut = new Date(`${dto.date_reservation}T${dto.heure_debut}`);
     const hFin = new Date(`${dto.date_reservation}T${dto.heure_fin}`);
+    this.ensureTimeRange(hDebut, hFin);
+
+    // Recalcul du prix en cas de changement d'heures
     const dureeHeures = (hFin.getTime() - hDebut.getTime()) / (1000 * 60 * 60);
     const prixTotal = local.prix_heure
       ? Number(local.prix_heure) * dureeHeures
@@ -217,7 +327,24 @@ export class ReservationsService {
   /**
    * ❌ ANNULER (User)
    */
-  async cancel(id: string) {
+  async cancel(userId: string, id: string) {
+    const existing = await this.prisma.reservations_locaux.findUnique({
+      where: { id },
+      select: { id: true, id_utilisateur: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Reservation introuvable');
+    }
+
+    const user = await this.resolveUserOrFail(userId);
+    const isOwner = existing.id_utilisateur === userId;
+    if (!isOwner && user.role !== 'ADMIN') {
+      throw new ForbiddenException(
+        'Vous ne pouvez annuler que vos propres reservations',
+      );
+    }
+
     return await this.prisma.reservations_locaux.update({
       where: { id },
       data: { statut: 'ANNULEE' },
