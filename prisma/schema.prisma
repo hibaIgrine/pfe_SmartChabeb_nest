@@ -48,6 +48,8 @@ model utilisateurs {
   inscriptions_clubs  inscriptions_clubs[]
   staff_dans_clubs    club_staff[]
   reservations        reservations_locaux[]
+  events_crees        events[]              @relation("event_creator")
+  event_participations event_participants[]
   notifications       notifications[]
   presences_club      presences_clubs[]      @relation("presence_membre")
   presences_marquees  presences_clubs[]      @relation("presence_responsable")
@@ -99,6 +101,7 @@ model clubs {
   staff        club_staff[]
   inscriptions inscriptions_clubs[]
   presences    presences_clubs[]
+  events       events[]
 }
 
 model club_roles {
@@ -183,6 +186,7 @@ model locaux {
   centre         centres  @relation(fields: [id_centre], references: [id], onDelete: Cascade)
   
   reservations   reservations_locaux[]
+  events         events[]
   equipements    room_equipment[]
 }
 
@@ -223,6 +227,48 @@ model reservations_locaux {
   utilisateur     utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
   id_local        String       @db.Uuid
   local           locaux       @relation(fields: [id_local], references: [id], onDelete: Cascade)
+}
+
+model events {
+  id            String   @id @default(uuid()) @db.Uuid
+  nom           String   @db.VarChar(120)
+  description   String?  @db.Text
+  date_event    DateTime @db.Date
+  start_time    DateTime @db.Timestamp(6)
+  end_time      DateTime @db.Timestamp(6)
+  capacity      Int?
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  club_id       String   @db.Uuid
+  club          clubs    @relation(fields: [club_id], references: [id], onDelete: Cascade)
+  locaux_id     String   @db.Uuid
+  local         locaux   @relation(fields: [locaux_id], references: [id], onDelete: Restrict)
+  created_by    String   @db.Uuid
+  createur      utilisateurs @relation("event_creator", fields: [created_by], references: [id], onDelete: Restrict)
+
+  participants  event_participants[]
+
+  @@index([date_event, is_active])
+  @@index([club_id])
+  @@index([locaux_id])
+}
+
+model event_participants {
+  id           String    @id @default(uuid()) @db.Uuid
+  status       String    @default("INVITED") @db.VarChar(20)
+  checkin      Boolean   @default(false)
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  event_id     String    @db.Uuid
+  event        events    @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user_id      String    @db.Uuid
+  user         utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([event_id, user_id])
+  @@index([user_id])
 }
 
 // ==========================================
