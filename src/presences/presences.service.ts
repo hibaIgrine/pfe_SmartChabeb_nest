@@ -504,7 +504,9 @@ export class PresencesService {
       },
     });
 
-    const presenceMap = new Map(presences.map((item) => [item.id_utilisateur, item]));
+    const presenceMap = new Map(
+      presences.map((item) => [item.id_utilisateur, item]),
+    );
 
     const headers = [
       'date_presence',
@@ -536,46 +538,95 @@ export class PresencesService {
 
     const exportedAt = new Date().toISOString();
 
-    const rows = inscriptions.map((item) => {
+    const reportRows = inscriptions.map((item) => {
       const record = presenceMap.get(item.id_utilisateur);
-      return [
+      return {
         dateLabel,
-        club.id,
-        club.nom,
-        club.categorie,
-        club.locale_fixe,
-        club.centre?.id,
-        club.centre?.nom,
-        club.centre?.gouvernorat,
-        club.centre?.delegation,
-        club.responsable?.id,
-        club.responsable?.nom,
-        club.responsable?.prenom,
-        club.responsable?.email,
-        item.utilisateur.id,
-        item.utilisateur.nom,
-        item.utilisateur.prenom,
-        item.utilisateur.email,
-        item.utilisateur.role,
-        record?.statut ?? 'NON_MARQUE',
-        record?.remarque ?? '',
-        record?.responsable?.id ?? '',
-        record?.responsable?.nom ?? '',
-        record?.responsable?.prenom ?? '',
-        record?.responsable?.email ?? '',
+        clubId: club.id,
+        clubNom: club.nom,
+        clubCategorie: club.categorie,
+        clubLocal: club.locale_fixe,
+        centreId: club.centre?.id ?? null,
+        centreNom: club.centre?.nom ?? null,
+        centreGouvernorat: club.centre?.gouvernorat ?? null,
+        centreDelegation: club.centre?.delegation ?? null,
+        responsableClubId: club.responsable?.id ?? null,
+        responsableClubNom: club.responsable?.nom ?? null,
+        responsableClubPrenom: club.responsable?.prenom ?? null,
+        responsableClubEmail: club.responsable?.email ?? null,
+        utilisateurId: item.utilisateur.id,
+        utilisateurNom: item.utilisateur.nom,
+        utilisateurPrenom: item.utilisateur.prenom,
+        utilisateurEmail: item.utilisateur.email,
+        utilisateurRole: item.utilisateur.role,
+        statutPresence: record?.statut ?? 'NON_MARQUE',
+        remarque: record?.remarque ?? '',
+        marqueParId: record?.responsable?.id ?? '',
+        marqueParNom: record?.responsable?.nom ?? '',
+        marqueParPrenom: record?.responsable?.prenom ?? '',
+        marqueParEmail: record?.responsable?.email ?? '',
         exportedAt,
-      ].map((cell) => this.escapeCsv(cell)).join(',');
+      };
     });
 
+    const rows = reportRows.map((row) =>
+      [
+        row.dateLabel,
+        row.clubId,
+        row.clubNom,
+        row.clubCategorie,
+        row.clubLocal,
+        row.centreId,
+        row.centreNom,
+        row.centreGouvernorat,
+        row.centreDelegation,
+        row.responsableClubId,
+        row.responsableClubNom,
+        row.responsableClubPrenom,
+        row.responsableClubEmail,
+        row.utilisateurId,
+        row.utilisateurNom,
+        row.utilisateurPrenom,
+        row.utilisateurEmail,
+        row.utilisateurRole,
+        row.statutPresence,
+        row.remarque,
+        row.marqueParId,
+        row.marqueParNom,
+        row.marqueParPrenom,
+        row.marqueParEmail,
+        row.exportedAt,
+      ]
+        .map((cell) => this.escapeCsv(cell))
+        .join(','),
+    );
+
     const csv = [headers.join(','), ...rows].join('\r\n');
-    const clubSlug = club.nom
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'club';
+    const clubSlug =
+      club.nom
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'club';
 
     return {
       fileName: `presence-${clubSlug}-${dateLabel}.csv`,
       csv,
+      metadata: {
+        datePresence: dateLabel,
+        club: {
+          id: club.id,
+          nom: club.nom,
+          categorie: club.categorie,
+          local: club.locale_fixe,
+        },
+        centre: {
+          id: club.centre?.id ?? null,
+          nom: club.centre?.nom ?? null,
+          gouvernorat: club.centre?.gouvernorat ?? null,
+          delegation: club.centre?.delegation ?? null,
+        },
+      },
+      records: reportRows,
     };
   }
 }

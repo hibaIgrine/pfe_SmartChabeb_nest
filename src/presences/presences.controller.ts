@@ -5,14 +5,12 @@ import {
   Param,
   Post,
   Query,
-  Res,
   Request,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { PresencesService } from './presences.service';
 import { MarkPresenceDto } from './dto/mark-presence.dto';
-import type { Response } from 'express';
 
 @Controller('presences')
 @UseGuards(AuthGuard('jwt'))
@@ -82,20 +80,11 @@ export class PresencesController {
     @Request() req: any,
     @Param('clubId') clubId: string,
     @Query('date') date: string | undefined,
-    @Res() res: Response,
   ) {
-    const result = await this.presencesService.exportDailyPresence(
+    return await this.presencesService.exportDailyPresence(
       req.user.userId,
       clubId,
       date,
     );
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${result.fileName}"`,
-    );
-
-    res.send(`\uFEFF${result.csv}`);
   }
 }
