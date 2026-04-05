@@ -22,6 +22,19 @@ type ReservationDecisionPayload = {
   adminId?: string;
 };
 
+type EventParticipationDecisionPayload = {
+  utilisateurId: string;
+  eventId: string;
+  eventNom: string;
+  clubId: string;
+  clubNom: string;
+  dateEvent: Date;
+  startTime: Date;
+  endTime: Date;
+  statut: 'CONFIRME' | 'REFUSE';
+  responsableId?: string;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -102,6 +115,50 @@ export class NotificationsService {
           heureFin: payload.heureFin.toISOString(),
           statut: payload.statut,
           adminId: payload.adminId ?? null,
+        },
+      },
+      select: {
+        id: true,
+        titre: true,
+        message: true,
+        type: true,
+        is_read: true,
+        created_at: true,
+        data: true,
+      },
+    });
+  }
+
+  async createEventParticipationDecisionNotification(
+    payload: EventParticipationDecisionPayload,
+  ) {
+    const isConfirmed = payload.statut === 'CONFIRME';
+    const dateLabel = this.formatDate(payload.dateEvent);
+    const startLabel = this.formatTime(payload.startTime);
+    const endLabel = this.formatTime(payload.endTime);
+
+    return this.prisma.notifications.create({
+      data: {
+        id_utilisateur: payload.utilisateurId,
+        type: isConfirmed
+          ? 'EVENT_PARTICIPATION_CONFIRMED'
+          : 'EVENT_PARTICIPATION_REFUSED',
+        titre: isConfirmed
+          ? 'Inscription evenement confirmee'
+          : 'Inscription evenement refusee',
+        message: isConfirmed
+          ? `Votre inscription a l'evenement ${payload.eventNom} (${payload.clubNom}) le ${dateLabel} de ${startLabel} a ${endLabel} a ete confirmee.`
+          : `Votre inscription a l'evenement ${payload.eventNom} (${payload.clubNom}) le ${dateLabel} de ${startLabel} a ${endLabel} a ete refusee.`,
+        data: {
+          eventId: payload.eventId,
+          eventNom: payload.eventNom,
+          clubId: payload.clubId,
+          clubNom: payload.clubNom,
+          dateEvent: payload.dateEvent.toISOString(),
+          startTime: payload.startTime.toISOString(),
+          endTime: payload.endTime.toISOString(),
+          statut: payload.statut,
+          responsableId: payload.responsableId ?? null,
         },
       },
       select: {

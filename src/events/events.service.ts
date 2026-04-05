@@ -5,13 +5,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, utilisateurs } from '@prisma/client';
+import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 
 @Injectable()
 export class EventsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private readonly participantStatuses = [
     'EN_ATTENTE',
@@ -886,6 +890,30 @@ export class EventsService {
 
     if (normalized === 'ANNULE' || normalized === 'REFUSE') {
       await this.promoteWaitlistIfPossible(eventId);
+    }
+
+    if (normalized === 'CONFIRME' || normalized === 'REFUSE') {
+      try {
+        await this.notificationsService.createEventParticipationDecisionNotification(
+          {
+            utilisateurId: participant.user_id,
+            eventId: event.id,
+            eventNom: event.nom,
+            clubId: event.club_id,
+            clubNom: event.club.nom,
+            dateEvent: event.date_event,
+            startTime: event.start_time,
+            endTime: event.end_time,
+            statut: normalized,
+            responsableId: requesterId,
+          },
+        );
+      } catch (error) {
+        console.error(
+          'Erreur creation notification participation evenement :',
+          error,
+        );
+      }
     }
 
     return updated;
