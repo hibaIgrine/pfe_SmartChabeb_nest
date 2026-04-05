@@ -37,6 +37,15 @@ export class EventsController {
     return this.eventsService.findAll(req.user.userId, include);
   }
 
+  @Get('me/participations')
+  findMyParticipations(
+    @Request() req: any,
+    @Query('includeInactive') includeInactive?: string,
+  ) {
+    const include = String(includeInactive).toLowerCase() === 'true';
+    return this.eventsService.findMyParticipations(req.user.userId, include);
+  }
+
   @Get('availability/check')
   checkAvailability(
     @Query('id_local') localId: string,
@@ -57,6 +66,55 @@ export class EventsController {
   @Get(':id')
   findOne(@Request() req: any, @Param('id') id: string) {
     return this.eventsService.findOne(req.user.userId, id);
+  }
+
+  @Post(':id/participants/register')
+  registerToEvent(@Request() req: any, @Param('id') id: string) {
+    return this.eventsService.registerToEvent(id, req.user.userId);
+  }
+
+  @Patch(':id/participants/me/cancel')
+  cancelMyRegistration(@Request() req: any, @Param('id') id: string) {
+    return this.eventsService.cancelMyRegistration(id, req.user.userId);
+  }
+
+  @Get(':id/participants')
+  listParticipants(@Request() req: any, @Param('id') id: string) {
+    return this.eventsService.listParticipants(id, req.user.userId);
+  }
+
+  @Patch(':id/participants/:participantId/status')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE', 'RESPONSABLE_CLUB')
+  updateParticipantStatus(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Param('participantId') participantId: string,
+    @Body('status') status: string,
+  ) {
+    return this.eventsService.updateParticipantStatus(
+      id,
+      participantId,
+      status,
+      req.user.userId,
+    );
+  }
+
+  @Patch(':id/participants/:participantId/checkin')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE', 'RESPONSABLE_CLUB')
+  setParticipantCheckin(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Param('participantId') participantId: string,
+    @Body('checkin') checkin: boolean,
+  ) {
+    return this.eventsService.setParticipantCheckin(
+      id,
+      participantId,
+      checkin,
+      req.user.userId,
+    );
   }
 
   @Patch(':id')

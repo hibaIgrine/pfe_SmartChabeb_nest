@@ -13,6 +13,13 @@ import { UpdateEventDto } from './dto/update-event.dto';
 export class EventsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private readonly participantStatuses = [
+    'EN_ATTENTE',
+    'CONFIRME',
+    'REFUSE',
+    'ANNULE',
+  ] as const;
+
   private addDays(baseDate: Date, days: number) {
     const copy = new Date(baseDate);
     copy.setDate(copy.getDate() + days);
@@ -227,6 +234,35 @@ export class EventsService {
     throw new ForbiddenException('Role non autorise pour gerer les evenements');
   }
 
+  private async resolveEventForManagement(eventId: string) {
+    const event = await this.prisma.events.findUnique({
+      where: { id: eventId },
+      include: {
+        club: { select: { id_coach: true, id_centre: true, nom: true } },
+        local: { select: { id_centre: true, nom: true } },
+      },
+    });
+
+    if (!event) {
+      throw new NotFoundException('Evenement introuvable');
+    }
+
+    return event;
+  }
+
+  private async countConfirmedParticipants(
+    eventId: string,
+    excludeId?: string,
+  ) {
+    return this.prisma.event_participants.count({
+      where: {
+        event_id: eventId,
+        status: 'CONFIRME',
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+    });
+  }
+
   private async buildVisibilityWhere(
     requester: Pick<utilisateurs, 'id' | 'role' | 'id_centre'>,
     includeInactive: boolean,
@@ -358,6 +394,58 @@ export class EventsService {
     });
   }
 
+  async findMyParticipations(userId: string, includeInactive = true) {
+    await this.resolveRequester(userId);
+
+    const events = await this.prisma.events.findMany({
+      where: {
+        ...(includeInactive ? {} : { is_active: true }),
+        OR: [
+          {
+            participants: {
+              some: {
+                user_id: userId,
+                status: { not: 'ANNULE' },
+              },
+            },
+          },
+          {
+            club: {
+              inscriptions: {
+                some: {
+                  id_utilisateur: userId,
+                  statut: 'ACCEPTE',
+                  est_suspendu: false,
+                },
+              },
+            },
+          },
+        ],
+      },
+      include: {
+        club: { select: { id: true, nom: true, categorie: true } },
+        local: { select: { id: true, nom: true, type: true } },
+        _count: { select: { participants: true } },
+        participants: {
+          where: { user_id: userId },
+          select: { status: true, checkin: true },
+          take: 1,
+        },
+      },
+      orderBy: [{ date_event: 'asc' }, { start_time: 'asc' }],
+    });
+
+    return events.map((event) => {
+      const myParticipation = event.participants[0];
+      return {
+        ...event,
+        participants: undefined,
+        my_participation_status: myParticipation?.status ?? null,
+        my_participation_checkin: myParticipation?.checkin ?? false,
+      };
+    });
+  }
+
   async findOne(userId: string, eventId: string) {
     const requester = await this.resolveRequester(userId);
 
@@ -396,6 +484,32 @@ export class EventsService {
       throw new NotFoundException('Evenement introuvable');
     }
 
+    const myParticipation =
+      requester.role === 'ADMIN'
+        ? null
+        : await this.prisma.event_participants.findUnique({
+            where: {
+              event_id_user_id: {
+                event_id: eventId,
+                user_id: requester.id,
+              },
+            },
+            select: { status: true },
+          });
+
+    const myAcceptedClubMembership =
+      requester.role === 'ADMIN'
+        ? null
+        : await this.prisma.inscriptions_clubs.findFirst({
+            where: {
+              id_utilisateur: requester.id,
+              id_club: event.club.id,
+              statut: 'ACCEPTE',
+              est_suspendu: false,
+            },
+            select: { id: true },
+          });
+
     if (requester.role === 'RESPONSABLE_CENTRE') {
       if (
         !requester.id_centre ||
@@ -404,10 +518,20 @@ export class EventsService {
         throw new ForbiddenException('Evenement hors de votre centre');
       }
     } else if (requester.role === 'RESPONSABLE_CLUB') {
-      if (event.club.id_coach !== requester.id) {
+      const isManagerOfClub = event.club.id_coach === requester.id;
+      const isAcceptedMemberOfClub = Boolean(myAcceptedClubMembership);
+      const isEventParticipant =
+        myParticipation?.status !== undefined &&
+        myParticipation.status !== 'ANNULE';
+
+      if (!isManagerOfClub && !isAcceptedMemberOfClub && !isEventParticipant) {
         throw new ForbiddenException('Evenement hors de vos clubs');
       }
-    } else if (requester.role !== 'ADMIN' && !event.is_active) {
+    } else if (
+      requester.role !== 'ADMIN' &&
+      !event.is_active &&
+      (!myParticipation || myParticipation.status === 'ANNULE')
+    ) {
       throw new ForbiddenException('Evenement inactif non accessible');
     }
 
@@ -558,5 +682,281 @@ export class EventsService {
         (endDateTime.getTime() - startDateTime.getTime()) / 60000,
       ),
     };
+  }
+
+  async registerToEvent(eventId: string, userId: string) {
+    const event = await this.prisma.events.findUnique({
+      where: { id: eventId },
+      include: {
+        club: { select: { id: true, nom: true, est_actif: true } },
+      },
+    });
+
+    if (!event) {
+      throw new NotFoundException('Evenement introuvable');
+    }
+
+    if (!event.is_active) {
+      throw new BadRequestException('Evenement inactif');
+    }
+
+    const user = await this.resolveRequester(userId);
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    const existing = await this.prisma.event_participants.findUnique({
+      where: {
+        event_id_user_id: {
+          event_id: eventId,
+          user_id: userId,
+        },
+      },
+    });
+
+    const nextStatus = 'EN_ATTENTE';
+
+    if (existing) {
+      if (existing.status === 'CONFIRME' || existing.status === 'EN_ATTENTE') {
+        throw new BadRequestException('Vous etes deja inscrit a cet evenement');
+      }
+
+      return this.prisma.event_participants.update({
+        where: { id: existing.id },
+        data: { status: nextStatus, checkin: false },
+        include: {
+          user: {
+            select: {
+              id: true,
+              nom: true,
+              prenom: true,
+              email: true,
+              role: true,
+            },
+          },
+        },
+      });
+    }
+
+    return this.prisma.event_participants.create({
+      data: {
+        event_id: eventId,
+        user_id: userId,
+        status: nextStatus,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+    });
+  }
+
+  async cancelMyRegistration(eventId: string, userId: string) {
+    const participant = await this.prisma.event_participants.findUnique({
+      where: {
+        event_id_user_id: {
+          event_id: eventId,
+          user_id: userId,
+        },
+      },
+    });
+
+    if (!participant) {
+      throw new NotFoundException('Inscription introuvable');
+    }
+
+    const updated = await this.prisma.event_participants.update({
+      where: { id: participant.id },
+      data: { status: 'ANNULE', checkin: false },
+    });
+
+    await this.promoteWaitlistIfPossible(eventId);
+    return updated;
+  }
+
+  async listParticipants(eventId: string, requesterId: string) {
+    const requester = await this.resolveRequester(requesterId);
+    const event = await this.resolveEventForManagement(eventId);
+
+    if (
+      requester.role === 'RESPONSABLE_CENTRE' &&
+      requester.id_centre !== event.local.id_centre
+    ) {
+      throw new ForbiddenException('Evenement hors de votre centre');
+    }
+
+    if (
+      requester.role === 'RESPONSABLE_CLUB' &&
+      event.club.id_coach !== requester.id
+    ) {
+      throw new ForbiddenException('Evenement hors de vos clubs');
+    }
+
+    const participants = await this.prisma.event_participants.findMany({
+      where: { event_id: eventId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+      orderBy: [{ status: 'asc' }, { created_at: 'asc' }],
+    });
+
+    return {
+      eventId,
+      confirmed: participants.filter((p) => p.status === 'CONFIRME'),
+      waitingList: participants.filter((p) => p.status === 'EN_ATTENTE'),
+      refused: participants.filter((p) => p.status === 'REFUSE'),
+      cancelled: participants.filter((p) => p.status === 'ANNULE'),
+      all: participants,
+    };
+  }
+
+  async updateParticipantStatus(
+    eventId: string,
+    participantId: string,
+    status: string,
+    requesterId: string,
+  ) {
+    const normalized = (status ?? '').toUpperCase();
+    if (!this.participantStatuses.includes(normalized as any)) {
+      throw new BadRequestException(
+        'status doit etre EN_ATTENTE, CONFIRME, REFUSE ou ANNULE',
+      );
+    }
+
+    const requester = await this.resolveRequester(requesterId);
+    const event = await this.resolveEventForManagement(eventId);
+    this.assertCanManageEvent(requester, event.local.id_centre, {
+      id_coach: event.club.id_coach,
+      id_centre: event.club.id_centre,
+    });
+
+    const participant = await this.prisma.event_participants.findFirst({
+      where: { id: participantId, event_id: eventId },
+    });
+
+    if (!participant) {
+      throw new NotFoundException('Participant introuvable pour cet evenement');
+    }
+
+    if (normalized === 'CONFIRME' && typeof event.capacity === 'number') {
+      const confirmedCount = await this.countConfirmedParticipants(
+        eventId,
+        participant.id,
+      );
+      if (confirmedCount >= event.capacity) {
+        throw new BadRequestException(
+          'Evenement complet, confirmation impossible',
+        );
+      }
+    }
+
+    const updated = await this.prisma.event_participants.update({
+      where: { id: participant.id },
+      data: {
+        status: normalized,
+        checkin: normalized === 'CONFIRME' ? participant.checkin : false,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    if (normalized === 'ANNULE' || normalized === 'REFUSE') {
+      await this.promoteWaitlistIfPossible(eventId);
+    }
+
+    return updated;
+  }
+
+  async setParticipantCheckin(
+    eventId: string,
+    participantId: string,
+    checkin: boolean,
+    requesterId: string,
+  ) {
+    const requester = await this.resolveRequester(requesterId);
+    const event = await this.resolveEventForManagement(eventId);
+    this.assertCanManageEvent(requester, event.local.id_centre, {
+      id_coach: event.club.id_coach,
+      id_centre: event.club.id_centre,
+    });
+
+    const participant = await this.prisma.event_participants.findFirst({
+      where: { id: participantId, event_id: eventId },
+    });
+    if (!participant) {
+      throw new NotFoundException('Participant introuvable pour cet evenement');
+    }
+
+    if (participant.status !== 'CONFIRME' && checkin) {
+      throw new BadRequestException(
+        'Seuls les participants confirmes peuvent etre check-in',
+      );
+    }
+
+    return this.prisma.event_participants.update({
+      where: { id: participant.id },
+      data: { checkin },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+    });
+  }
+
+  private async promoteWaitlistIfPossible(eventId: string) {
+    const event = await this.prisma.events.findUnique({
+      where: { id: eventId },
+      select: { id: true, capacity: true },
+    });
+    if (!event || typeof event.capacity !== 'number') return;
+
+    const confirmedCount = await this.countConfirmedParticipants(eventId);
+    const remaining = event.capacity - confirmedCount;
+    if (remaining <= 0) return;
+
+    const waiting = await this.prisma.event_participants.findMany({
+      where: { event_id: eventId, status: 'EN_ATTENTE' },
+      orderBy: { created_at: 'asc' },
+      take: remaining,
+      select: { id: true },
+    });
+
+    if (waiting.length === 0) return;
+
+    await this.prisma.event_participants.updateMany({
+      where: { id: { in: waiting.map((p) => p.id) } },
+      data: { status: 'CONFIRME' },
+    });
   }
 }
