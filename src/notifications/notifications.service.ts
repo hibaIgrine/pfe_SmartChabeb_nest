@@ -35,6 +35,23 @@ type EventParticipationDecisionPayload = {
   responsableId?: string;
 };
 
+type EventUpdatePayload = {
+  utilisateurId: string;
+  eventId: string;
+  eventNom: string;
+  clubId: string;
+  clubNom: string;
+  localNom: string;
+  dateEvent: Date;
+  startTime: Date;
+  endTime: Date;
+  dateEventText?: string;
+  startTimeText?: string;
+  endTimeText?: string;
+  changes: string[];
+  responsableId?: string;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -237,6 +254,48 @@ export class NotificationsService {
           startTime: payload.startTime.toISOString(),
           endTime: payload.endTime.toISOString(),
           statut: payload.statut,
+          responsableId: payload.responsableId ?? null,
+        },
+      },
+      select: {
+        id: true,
+        titre: true,
+        message: true,
+        type: true,
+        is_read: true,
+        created_at: true,
+        data: true,
+      },
+    });
+  }
+
+  async createEventUpdateNotification(payload: EventUpdatePayload) {
+    const dateLabel =
+      payload.dateEventText ?? this.formatDate(payload.dateEvent);
+    const startLabel =
+      payload.startTimeText ?? this.formatTime(payload.startTime);
+    const endLabel = payload.endTimeText ?? this.formatTime(payload.endTime);
+    const changeLabel =
+      payload.changes.length > 0
+        ? payload.changes.join(', ')
+        : 'les informations';
+
+    return this.prisma.notifications.create({
+      data: {
+        id_utilisateur: payload.utilisateurId,
+        type: 'EVENT_UPDATED',
+        titre: 'Evenement modifie',
+        message: `L'evenement ${payload.eventNom} (${payload.clubNom}) a ete modifie: ${changeLabel}. Nouveaux details: ${dateLabel} de ${startLabel} a ${endLabel} au local ${payload.localNom}.`,
+        data: {
+          eventId: payload.eventId,
+          eventNom: payload.eventNom,
+          clubId: payload.clubId,
+          clubNom: payload.clubNom,
+          localNom: payload.localNom,
+          dateEvent: payload.dateEvent.toISOString(),
+          startTime: payload.startTime.toISOString(),
+          endTime: payload.endTime.toISOString(),
+          changes: payload.changes,
           responsableId: payload.responsableId ?? null,
         },
       },

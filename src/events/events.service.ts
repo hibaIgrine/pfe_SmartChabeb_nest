@@ -602,7 +602,7 @@ export class EventsService {
       );
     }
 
-    return this.prisma.events.update({
+    const updatedEvent = await this.prisma.events.update({
       where: { id: eventId },
       data: {
         nom: dto.nom ?? existing.nom,
@@ -620,6 +620,79 @@ export class EventsService {
         _count: { select: { participants: true } },
       },
     });
+
+    const changes: string[] = [];
+    if ((dto.nom ?? existing.nom) !== existing.nom) changes.push('le nom');
+    if ((dto.description ?? existing.description) !== existing.description)
+      changes.push('la description');
+    if (dateEvent !== existing.date_event.toISOString().split('T')[0])
+      changes.push('la date');
+    if (
+      startTime !== existing.start_time.toISOString().split('T')[1].slice(0, 8)
+    )
+      changes.push('l heure de debut');
+    if (endTime !== existing.end_time.toISOString().split('T')[1].slice(0, 8))
+      changes.push('l heure de fin');
+    if ((dto.capacity ?? existing.capacity) !== existing.capacity)
+      changes.push('la capacite');
+    if (nextLocalId !== existing.locaux_id) changes.push('le local');
+    if (nextClubId !== existing.club_id) changes.push('le club');
+
+    if (changes.length > 0) {
+      const participantsToNotify =
+        await this.prisma.event_participants.findMany({
+          where: {
+            event_id: eventId,
+            status: { in: ['CONFIRME', 'EN_ATTENTE'] },
+          },
+          select: {
+            user_id: true,
+          },
+        });
+
+      await this.prisma.notifications.deleteMany({
+        where: {
+          id_utilisateur: {
+            in: participantsToNotify.map((participant) => participant.user_id),
+          },
+          type: {
+            in: ['EVENT_UPDATED', 'EVENT_REMINDER'],
+          },
+          data: {
+            path: ['eventId'],
+            equals: eventId,
+          },
+        },
+      });
+
+      for (const participant of participantsToNotify) {
+        try {
+          await this.notificationsService.createEventUpdateNotification({
+            utilisateurId: participant.user_id,
+            eventId: updatedEvent.id,
+            eventNom: updatedEvent.nom,
+            clubId: nextClubId,
+            clubNom: updatedEvent.club.nom,
+            localNom: updatedEvent.local.nom,
+            dateEvent: updatedEvent.date_event,
+            startTime: updatedEvent.start_time,
+            endTime: updatedEvent.end_time,
+            dateEventText: dateEvent,
+            startTimeText: startTime.slice(0, 5),
+            endTimeText: endTime.slice(0, 5),
+            changes,
+            responsableId: requester.id,
+          });
+        } catch (error) {
+          console.error(
+            'Erreur creation notification modification evenement :',
+            error,
+          );
+        }
+      }
+    }
+
+    return updatedEvent;
   }
 
   async setActive(userId: string, eventId: string, isActive: boolean) {
