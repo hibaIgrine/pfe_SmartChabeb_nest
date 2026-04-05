@@ -39,6 +39,85 @@ type EventParticipationDecisionPayload = {
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async createUpcomingEventReminders(utilisateurId: string) {
+    const now = new Date();
+    const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    const upcomingParticipations =
+      await this.prisma.event_participants.findMany({
+        where: {
+          user_id: utilisateurId,
+          status: 'CONFIRME',
+          event: {
+            is_active: true,
+            start_time: {
+              gt: now,
+              lte: next24Hours,
+            },
+          },
+        },
+        include: {
+          event: {
+            select: {
+              id: true,
+              nom: true,
+              date_event: true,
+              start_time: true,
+              end_time: true,
+              club: { select: { id: true, nom: true } },
+              local: { select: { id: true, nom: true } },
+            },
+          },
+        },
+        orderBy: { event: { start_time: 'asc' } },
+        take: 20,
+      });
+
+    for (const participation of upcomingParticipations) {
+      const event = participation.event;
+      if (!event) continue;
+
+      const existingReminder = await this.prisma.notifications.findFirst({
+        where: {
+          id_utilisateur: utilisateurId,
+          type: 'EVENT_REMINDER',
+          data: {
+            path: ['eventId'],
+            equals: event.id,
+          },
+        },
+        select: { id: true },
+      });
+
+      if (existingReminder) continue;
+
+      const dateLabel = this.formatDate(event.date_event);
+      const startLabel = this.formatTime(event.start_time);
+      const endLabel = this.formatTime(event.end_time);
+
+      await this.prisma.notifications.create({
+        data: {
+          id_utilisateur: utilisateurId,
+          type: 'EVENT_REMINDER',
+          titre: 'Rappel evenement',
+          message: `Rappel: votre evenement ${event.nom} (${event.club.nom}) commence le ${dateLabel} de ${startLabel} a ${endLabel}.`,
+          data: {
+            eventId: event.id,
+            eventNom: event.nom,
+            clubId: event.club.id,
+            clubNom: event.club.nom,
+            localId: event.local.id,
+            localNom: event.local.nom,
+            dateEvent: event.date_event.toISOString(),
+            startTime: event.start_time.toISOString(),
+            endTime: event.end_time.toISOString(),
+            reminderWindow: '24H',
+          },
+        },
+      });
+    }
+  }
+
   private formatTime(date: Date) {
     return date.toLocaleTimeString('fr-FR', {
       hour: '2-digit',
@@ -174,6 +253,8 @@ export class NotificationsService {
   }
 
   async getMyNotifications(utilisateurId: string, limit = 20) {
+    await this.createUpcomingEventReminders(utilisateurId);
+
     const safeLimit = Math.min(Math.max(limit, 1), 100);
 
     return this.prisma.notifications.findMany({
@@ -193,6 +274,8 @@ export class NotificationsService {
   }
 
   async getMyUnreadCount(utilisateurId: string) {
+    await this.createUpcomingEventReminders(utilisateurId);
+
     const count = await this.prisma.notifications.count({
       where: { id_utilisateur: utilisateurId, is_read: false },
     });
