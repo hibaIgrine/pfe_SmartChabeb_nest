@@ -51,10 +51,10 @@ export class ClubsService {
 
   async create(data: any) {
     return await this.prisma.$transaction(async (tx) => {
-      let finalLogoUrl = data.logo_url
+      const finalLogoUrl = data.logo_url
         ? this.saveBase64Image(data.logo_url)
         : undefined;
-      let finalPlanning =
+      const finalPlanning =
         typeof data.planning === 'string'
           ? { texte: data.planning }
           : data.planning;

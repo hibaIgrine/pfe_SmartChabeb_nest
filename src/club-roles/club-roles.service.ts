@@ -112,7 +112,7 @@ export class ClubRolesService {
           nom: roleName,
           description:
             updateClubRoleDto.description !== undefined
-              ? updateClubRoleDto.description?.trim() ?? ''
+              ? (updateClubRoleDto.description?.trim() ?? '')
               : undefined,
         },
       });

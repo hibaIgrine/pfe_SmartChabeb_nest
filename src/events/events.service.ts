@@ -725,6 +725,88 @@ export class EventsService {
     });
   }
 
+  async cancelEvent(userId: string, eventId: string) {
+    const requester = await this.resolveRequester(userId);
+
+    const existing = await this.prisma.events.findUnique({
+      where: { id: eventId },
+      include: {
+        club: {
+          select: { id: true, nom: true, id_coach: true, id_centre: true },
+        },
+        local: { select: { id: true, nom: true, id_centre: true } },
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Evenement introuvable');
+    }
+
+    this.assertCanManageEvent(requester, existing.local.id_centre, {
+      id_coach: existing.club.id_coach,
+      id_centre: existing.club.id_centre,
+    });
+
+    if (!existing.is_active) {
+      throw new BadRequestException('Evenement deja annule ou inactif');
+    }
+
+    const participantsToNotify = await this.prisma.event_participants.findMany({
+      where: {
+        event_id: eventId,
+        status: { in: ['CONFIRME', 'EN_ATTENTE'] },
+      },
+      select: { user_id: true },
+    });
+
+    const updatedEvent = await this.prisma.events.update({
+      where: { id: eventId },
+      data: { is_active: false },
+      include: {
+        club: { select: { id: true, nom: true } },
+        local: { select: { id: true, nom: true } },
+        _count: { select: { participants: true } },
+      },
+    });
+
+    await this.prisma.notifications.deleteMany({
+      where: {
+        id_utilisateur: {
+          in: participantsToNotify.map((participant) => participant.user_id),
+        },
+        type: { in: ['EVENT_UPDATED', 'EVENT_REMINDER'] },
+        data: {
+          path: ['eventId'],
+          equals: eventId,
+        },
+      },
+    });
+
+    for (const participant of participantsToNotify) {
+      try {
+        await this.notificationsService.createEventCancellationNotification({
+          utilisateurId: participant.user_id,
+          eventId: existing.id,
+          eventNom: existing.nom,
+          clubId: existing.club.id,
+          clubNom: existing.club.nom,
+          localNom: existing.local.nom,
+          dateEvent: existing.date_event,
+          startTime: existing.start_time,
+          endTime: existing.end_time,
+          responsableId: requester.id,
+        });
+      } catch (error) {
+        console.error(
+          'Erreur creation notification annulation evenement :',
+          error,
+        );
+      }
+    }
+
+    return updatedEvent;
+  }
+
   async checkLocalAvailability(
     localId: string,
     date: string,

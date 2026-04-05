@@ -52,6 +52,19 @@ type EventUpdatePayload = {
   responsableId?: string;
 };
 
+type EventCancellationPayload = {
+  utilisateurId: string;
+  eventId: string;
+  eventNom: string;
+  clubId: string;
+  clubNom: string;
+  localNom: string;
+  dateEvent: Date;
+  startTime: Date;
+  endTime: Date;
+  responsableId?: string;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -296,6 +309,41 @@ export class NotificationsService {
           startTime: payload.startTime.toISOString(),
           endTime: payload.endTime.toISOString(),
           changes: payload.changes,
+          responsableId: payload.responsableId ?? null,
+        },
+      },
+      select: {
+        id: true,
+        titre: true,
+        message: true,
+        type: true,
+        is_read: true,
+        created_at: true,
+        data: true,
+      },
+    });
+  }
+
+  async createEventCancellationNotification(payload: EventCancellationPayload) {
+    const dateLabel = this.formatDate(payload.dateEvent);
+    const startLabel = this.formatTime(payload.startTime);
+    const endLabel = this.formatTime(payload.endTime);
+
+    return this.prisma.notifications.create({
+      data: {
+        id_utilisateur: payload.utilisateurId,
+        type: 'EVENT_CANCELLED',
+        titre: 'Evenement annule',
+        message: `L'evenement ${payload.eventNom} (${payload.clubNom}) prevu le ${dateLabel} de ${startLabel} a ${endLabel} au local ${payload.localNom} a ete annule.`,
+        data: {
+          eventId: payload.eventId,
+          eventNom: payload.eventNom,
+          clubId: payload.clubId,
+          clubNom: payload.clubNom,
+          localNom: payload.localNom,
+          dateEvent: payload.dateEvent.toISOString(),
+          startTime: payload.startTime.toISOString(),
+          endTime: payload.endTime.toISOString(),
           responsableId: payload.responsableId ?? null,
         },
       },

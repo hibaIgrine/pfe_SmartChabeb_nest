@@ -4,7 +4,7 @@ import { RolesController } from './roles.controller';
 import { PrismaModule } from 'src/prisma/prisma.module';
 
 @Module({
-  imports:[PrismaModule],
+  imports: [PrismaModule],
   controllers: [RolesController],
   providers: [RolesService],
 })

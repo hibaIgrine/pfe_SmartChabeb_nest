@@ -141,4 +141,11 @@ export class EventsController {
   deactivate(@Request() req: any, @Param('id') id: string) {
     return this.eventsService.setActive(req.user.userId, id, false);
   }
+
+  @Patch(':id/cancel')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE', 'RESPONSABLE_CLUB')
+  cancel(@Request() req: any, @Param('id') id: string) {
+    return this.eventsService.cancelEvent(req.user.userId, id);
+  }
 }

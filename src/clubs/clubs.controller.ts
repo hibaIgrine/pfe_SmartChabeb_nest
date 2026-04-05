@@ -98,14 +98,20 @@ export class ClubsController {
   @Patch(':id/staff/:staffId/deactivate')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN', 'RESPONSABLE_CENTRE', 'RESPONSABLE_CLUB')
-  async deactivateStaff(@Param('id') clubId: string, @Param('staffId') staffId: string) {
+  async deactivateStaff(
+    @Param('id') clubId: string,
+    @Param('staffId') staffId: string,
+  ) {
     return await this.clubsService.deactivateStaff(clubId, staffId);
   }
 
   @Patch(':id/staff/:staffId/reactivate')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN', 'RESPONSABLE_CENTRE', 'RESPONSABLE_CLUB')
-  async reactivateStaff(@Param('id') clubId: string, @Param('staffId') staffId: string) {
+  async reactivateStaff(
+    @Param('id') clubId: string,
+    @Param('staffId') staffId: string,
+  ) {
     return await this.clubsService.reactivateStaff(clubId, staffId);
   }
 

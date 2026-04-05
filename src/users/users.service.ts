@@ -89,7 +89,7 @@ export class UsersService {
     });
     if (!currentUser) throw new UnauthorizedException('Utilisateur non trouvé');
 
-    let status = 'PROFILE_UPDATED';
+    const status = 'PROFILE_UPDATED';
 
     // Sécurité Mot de passe
     if (
