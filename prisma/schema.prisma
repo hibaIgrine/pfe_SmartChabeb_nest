@@ -50,6 +50,7 @@ model utilisateurs {
   reservations        reservations_locaux[]
   events_crees        events[]              @relation("event_creator")
   event_participations event_participants[]
+  event_feedbacks     eventFeedbacks[]
   notifications       notifications[]
   presences_club      presences_clubs[]      @relation("presence_membre")
   presences_marquees  presences_clubs[]      @relation("presence_responsable")
@@ -249,6 +250,7 @@ model events {
   createur      utilisateurs @relation("event_creator", fields: [created_by], references: [id], onDelete: Restrict)
 
   participants  event_participants[]
+  feedbacks     eventFeedbacks[]
 
   @@index([date_event, is_active])
   @@index([club_id])
@@ -269,6 +271,24 @@ model event_participants {
 
   @@unique([event_id, user_id])
   @@index([user_id])
+}
+
+model eventFeedbacks {
+  id           String    @id @default(uuid()) @db.Uuid
+  note         Int
+  commentaire  String?   @db.Text
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  event_id     String    @db.Uuid
+  event        events    @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user_id      String    @db.Uuid
+  user         utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([event_id, user_id])
+  @@index([event_id])
+  @@index([user_id])
+  @@map("event_feedbacks")
 }
 
 // ==========================================

@@ -8,6 +8,7 @@ import { Prisma, utilisateurs } from '@prisma/client';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateEventDto } from './dto/create-event.dto';
+import { CreateEventFeedbackDto } from './dto/create-event-feedback.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 
 @Injectable()
@@ -265,6 +266,69 @@ export class EventsService {
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
     });
+  }
+
+  private async buildFeedbackSummary(eventId: string, userId: string) {
+    const [stats, recentFeedbacks, myFeedback, myParticipation, event] =
+      await Promise.all([
+        this.prisma.eventFeedbacks.aggregate({
+          where: { event_id: eventId },
+          _avg: { note: true },
+          _count: { note: true },
+        }),
+        this.prisma.eventFeedbacks.findMany({
+          where: { event_id: eventId },
+          include: {
+            user: {
+              select: { id: true, nom: true, prenom: true },
+            },
+          },
+          orderBy: { created_at: 'desc' },
+          take: 10,
+        }),
+        this.prisma.eventFeedbacks.findUnique({
+          where: {
+            event_id_user_id: {
+              event_id: eventId,
+              user_id: userId,
+            },
+          },
+          select: {
+            id: true,
+            note: true,
+            commentaire: true,
+            created_at: true,
+            updated_at: true,
+          },
+        }),
+        this.prisma.event_participants.findUnique({
+          where: {
+            event_id_user_id: {
+              event_id: eventId,
+              user_id: userId,
+            },
+          },
+          select: { status: true },
+        }),
+        this.prisma.events.findUnique({
+          where: { id: eventId },
+          select: { start_time: true },
+        }),
+      ]);
+
+    const canRate =
+      Boolean(event) &&
+      (myParticipation?.status === 'CONFIRME' ||
+        myParticipation?.status === 'ANNULE') &&
+      new Date(event?.start_time ?? 0).getTime() <= Date.now();
+
+    return {
+      ratingAverage: Number((stats._avg.note ?? 0).toFixed(1)),
+      ratingCount: stats._count.note,
+      myFeedback,
+      canRate,
+      recentFeedbacks,
+    };
   }
 
   private async buildVisibilityWhere(
@@ -731,7 +795,121 @@ export class EventsService {
       throw new ForbiddenException('Evenement inactif non accessible');
     }
 
-    return event;
+    const feedbackSummary = await this.buildFeedbackSummary(
+      eventId,
+      requester.id,
+    );
+
+    return {
+      ...event,
+      ratingAverage: feedbackSummary.ratingAverage,
+      ratingCount: feedbackSummary.ratingCount,
+      myFeedback: feedbackSummary.myFeedback,
+      canRate: feedbackSummary.canRate,
+      recentFeedbacks: feedbackSummary.recentFeedbacks,
+    };
+  }
+
+  async getEventFeedback(eventId: string, userId: string) {
+    const event = await this.prisma.events.findUnique({
+      where: { id: eventId },
+      select: { id: true },
+    });
+
+    if (!event) {
+      throw new NotFoundException('Evenement introuvable');
+    }
+
+    await this.findOne(userId, eventId);
+    return this.buildFeedbackSummary(eventId, userId);
+  }
+
+  async submitEventFeedback(
+    eventId: string,
+    userId: string,
+    dto: CreateEventFeedbackDto,
+  ) {
+    const event = await this.prisma.events.findUnique({
+      where: { id: eventId },
+      select: { id: true, start_time: true },
+    });
+
+    if (!event) {
+      throw new NotFoundException('Evenement introuvable');
+    }
+
+    const participation = await this.prisma.event_participants.findUnique({
+      where: {
+        event_id_user_id: {
+          event_id: eventId,
+          user_id: userId,
+        },
+      },
+      select: { status: true },
+    });
+
+    if (
+      !participation ||
+      (participation.status !== 'CONFIRME' && participation.status !== 'ANNULE')
+    ) {
+      throw new ForbiddenException(
+        'Seuls les membres ayant participe peuvent noter cet evenement',
+      );
+    }
+
+    if (new Date(event.start_time).getTime() > Date.now()) {
+      throw new BadRequestException(
+        'La notation est disponible a partir du debut de l evenement',
+      );
+    }
+
+    const note = Number(dto.note);
+    if (!Number.isInteger(note) || note < 1 || note > 5) {
+      throw new BadRequestException('La note doit etre comprise entre 1 et 5');
+    }
+
+    const commentaire = dto.commentaire?.trim() || null;
+    if (commentaire && commentaire.length > 500) {
+      throw new BadRequestException(
+        'Le commentaire ne doit pas depasser 500 caracteres',
+      );
+    }
+
+    const feedback = await this.prisma.eventFeedbacks.upsert({
+      where: {
+        event_id_user_id: {
+          event_id: eventId,
+          user_id: userId,
+        },
+      },
+      update: {
+        note,
+        commentaire,
+      },
+      create: {
+        event_id: eventId,
+        user_id: userId,
+        note,
+        commentaire,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+          },
+        },
+      },
+    });
+
+    const summary = await this.buildFeedbackSummary(eventId, userId);
+
+    return {
+      feedback,
+      ratingAverage: summary.ratingAverage,
+      ratingCount: summary.ratingCount,
+    };
   }
 
   async update(userId: string, eventId: string, dto: UpdateEventDto) {

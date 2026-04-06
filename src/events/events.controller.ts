@@ -13,6 +13,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Roles } from 'src/auth/roles.decorator';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { CreateEventDto } from './dto/create-event.dto';
+import { CreateEventFeedbackDto } from './dto/create-event-feedback.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventsService } from './events.service';
 
@@ -75,6 +76,20 @@ export class EventsController {
   @Get(':id')
   findOne(@Request() req: any, @Param('id') id: string) {
     return this.eventsService.findOne(req.user.userId, id);
+  }
+
+  @Get(':id/feedback')
+  getEventFeedback(@Request() req: any, @Param('id') id: string) {
+    return this.eventsService.getEventFeedback(id, req.user.userId);
+  }
+
+  @Post(':id/feedback')
+  submitEventFeedback(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() dto: CreateEventFeedbackDto,
+  ) {
+    return this.eventsService.submitEventFeedback(id, req.user.userId, dto);
   }
 
   @Post(':id/participants/register')
