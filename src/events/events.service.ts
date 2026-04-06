@@ -407,10 +407,24 @@ export class EventsService {
       select: {
         id: true,
         nom: true,
+        date_event: true,
         capacity: true,
+        club: {
+          select: {
+            id: true,
+            nom: true,
+          },
+        },
         participants: {
           select: {
             status: true,
+            user: {
+              select: {
+                id: true,
+                nom: true,
+                prenom: true,
+              },
+            },
           },
         },
       },
@@ -422,8 +436,37 @@ export class EventsService {
     let totalCapacity = 0;
     let eventsWithParticipants = 0;
 
+    const clubStatsMap = new Map<
+      string,
+      {
+        clubId: string;
+        clubNom: string;
+        participants: number;
+        confirmed: number;
+        waiting: number;
+        evenements: number;
+      }
+    >();
+
+    const userStatsMap = new Map<
+      string,
+      {
+        userId: string;
+        nom: string;
+        participations: number;
+        confirmees: number;
+        enAttente: number;
+      }
+    >();
+
+    const frequencyMap = new Map<string, number>();
+
     const popularEvents = events
       .map((event) => {
+        const periodDate = new Date(event.date_event);
+        const periodKey = `${String(periodDate.getMonth() + 1).padStart(2, '0')}/${periodDate.getFullYear()}`;
+        frequencyMap.set(periodKey, (frequencyMap.get(periodKey) ?? 0) + 1);
+
         const confirmed = event.participants.filter(
           (participant) => participant.status === 'CONFIRME',
         ).length;
@@ -448,6 +491,49 @@ export class EventsService {
           eventsWithParticipants += 1;
         }
 
+        const existingClubStat = clubStatsMap.get(event.club.id) ?? {
+          clubId: event.club.id,
+          clubNom: event.club.nom,
+          participants: 0,
+          confirmed: 0,
+          waiting: 0,
+          evenements: 0,
+        };
+
+        existingClubStat.participants += participants;
+        existingClubStat.confirmed += confirmed;
+        existingClubStat.waiting += waiting;
+        existingClubStat.evenements += 1;
+        clubStatsMap.set(event.club.id, existingClubStat);
+
+        for (const participant of event.participants) {
+          if (
+            participant.status !== 'CONFIRME' &&
+            participant.status !== 'EN_ATTENTE'
+          ) {
+            continue;
+          }
+
+          const fullName =
+            `${participant.user.prenom} ${participant.user.nom}`.trim();
+          const existingUserStat = userStatsMap.get(participant.user.id) ?? {
+            userId: participant.user.id,
+            nom: fullName || 'Utilisateur',
+            participations: 0,
+            confirmees: 0,
+            enAttente: 0,
+          };
+
+          existingUserStat.participations += 1;
+          if (participant.status === 'CONFIRME') {
+            existingUserStat.confirmees += 1;
+          }
+          if (participant.status === 'EN_ATTENTE') {
+            existingUserStat.enAttente += 1;
+          }
+          userStatsMap.set(participant.user.id, existingUserStat);
+        }
+
         return {
           id: event.id,
           nom: event.nom,
@@ -460,6 +546,27 @@ export class EventsService {
       })
       .sort((a, b) => b.participants - a.participants)
       .slice(0, 5);
+
+    const participationParClub = Array.from(clubStatsMap.values())
+      .sort((a, b) => b.participants - a.participants)
+      .slice(0, 8);
+
+    const participationParUtilisateur = Array.from(userStatsMap.values())
+      .sort((a, b) => b.participations - a.participations)
+      .slice(0, 10);
+
+    const frequenceEvenements = Array.from(frequencyMap.entries())
+      .map(([periode, evenements]) => ({ periode, evenements }))
+      .sort((a, b) => {
+        const [monthA, yearA] = a.periode
+          .split('/')
+          .map((value) => Number(value));
+        const [monthB, yearB] = b.periode
+          .split('/')
+          .map((value) => Number(value));
+        if (yearA !== yearB) return yearA - yearB;
+        return monthA - monthB;
+      });
 
     const tauxParticipation =
       totalEvents > 0
@@ -477,6 +584,9 @@ export class EventsService {
       tauxParticipation,
       tauxRemplissage,
       evenementsPopulaires: popularEvents,
+      participationParClub,
+      participationParUtilisateur,
+      frequenceEvenements,
     };
   }
 
