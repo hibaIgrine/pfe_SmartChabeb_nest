@@ -29,9 +29,9 @@ export class LocauxController {
 
   @Post()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles('ADMIN') // Seul l'admin crée des locaux
-  create(@Body() dto: CreateLocalDto) {
-    return this.locauxService.create(dto);
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE')
+  create(@Request() req: any, @Body() dto: CreateLocalDto) {
+    return this.locauxService.create(dto, req.user.userId, req.user.role);
   }
 
   @Get(':id')

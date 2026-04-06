@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateLocalDto } from './dto/create-local.dto';
 
@@ -6,9 +10,41 @@ import { CreateLocalDto } from './dto/create-local.dto';
 export class LocauxService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(dto: CreateLocalDto) {
+  async create(
+    dto: CreateLocalDto,
+    requesterId?: string,
+    requesterRole?: string,
+  ) {
+    let resolvedCentreId = dto.id_centre;
+
+    if (requesterRole === 'RESPONSABLE_CENTRE') {
+      if (!requesterId) {
+        throw new BadRequestException('Utilisateur responsable introuvable');
+      }
+
+      const requester = await this.prisma.utilisateurs.findUnique({
+        where: { id: requesterId },
+        select: { id_centre: true },
+      });
+
+      if (!requester?.id_centre) {
+        throw new BadRequestException(
+          'Aucun centre associe au responsable courant',
+        );
+      }
+
+      resolvedCentreId = requester.id_centre;
+    }
+
+    if (!resolvedCentreId) {
+      throw new BadRequestException('id_centre est obligatoire');
+    }
+
     return await this.prisma.locaux.create({
-      data: dto,
+      data: {
+        ...dto,
+        id_centre: resolvedCentreId,
+      },
     });
   }
 
