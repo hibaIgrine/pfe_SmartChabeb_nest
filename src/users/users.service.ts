@@ -378,6 +378,29 @@ export class UsersService {
     });
   }
 
+  async assignResponsibleToCentre(userId: string, id_centre: string) {
+    const [centre, roleObj] = await Promise.all([
+      this.prisma.centres.findUnique({ where: { id: id_centre } }),
+      this.prisma.roles.findUnique({ where: { nom: 'RESPONSABLE_CENTRE' } }),
+    ]);
+
+    if (!centre) {
+      throw new NotFoundException('Centre introuvable');
+    }
+
+    return await this.prisma.utilisateurs.update({
+      where: { id: userId },
+      data: {
+        id_centre,
+        role: 'RESPONSABLE_CENTRE',
+        id_role: roleObj?.id,
+      },
+      include: {
+        centre: true,
+      },
+    });
+  }
+
   async findStaffByCentre(id_centre: string) {
     return await this.prisma.utilisateurs.findMany({
       where: {

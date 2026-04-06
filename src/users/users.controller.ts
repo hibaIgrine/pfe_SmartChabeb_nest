@@ -175,7 +175,7 @@ export class UsersController {
     @Param('id') id: string,
     @Body('id_centre') id_centre: string,
   ) {
-    return await this.usersService.updateStatus(id, { id_centre });
+    return await this.usersService.assignResponsibleToCentre(id, id_centre);
   }
 
   @Delete(':id')
