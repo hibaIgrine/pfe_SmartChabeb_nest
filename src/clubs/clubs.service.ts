@@ -49,7 +49,40 @@ export class ClubsService {
   // CRUD : Gestion des Clubs
   // ==========================================
 
-  async create(data: any) {
+  async create(data: any, requesterId?: string, requesterRole?: string) {
+    return this.createWithAccessControl(data, requesterId, requesterRole);
+  }
+
+  async createWithAccessControl(
+    data: any,
+    requesterId?: string,
+    requesterRole?: string,
+  ) {
+    let resolvedCentreId = data.id_centre;
+
+    if (requesterRole === 'RESPONSABLE_CENTRE') {
+      if (!requesterId) {
+        throw new BadRequestException('Utilisateur responsable introuvable');
+      }
+
+      const requester = await this.prisma.utilisateurs.findUnique({
+        where: { id: requesterId },
+        select: { id_centre: true, role: true },
+      });
+
+      if (!requester || !requester.id_centre) {
+        throw new BadRequestException(
+          'Aucun centre associe au responsable courant',
+        );
+      }
+
+      resolvedCentreId = requester.id_centre;
+    }
+
+    if (!resolvedCentreId) {
+      throw new BadRequestException('id_centre est obligatoire');
+    }
+
     return await this.prisma.$transaction(async (tx) => {
       const finalLogoUrl = data.logo_url
         ? this.saveBase64Image(data.logo_url)
@@ -64,7 +97,7 @@ export class ClubsService {
           nom: data.nom,
           description: data.description,
           categorie: data.categorie,
-          id_centre: data.id_centre, // 💡 id_salle -> id_centre
+          id_centre: resolvedCentreId,
           id_coach: data.id_coach || undefined,
           planning: finalPlanning,
           logo_url: finalLogoUrl,

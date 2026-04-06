@@ -144,8 +144,8 @@ export class ClubsController {
 
   @Post()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles('ADMIN')
-  async create(@Body() body: any) {
-    return await this.clubsService.create(body);
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE')
+  async create(@Request() req: any, @Body() body: any) {
+    return await this.clubsService.create(body, req.user.userId, req.user.role);
   }
 }
