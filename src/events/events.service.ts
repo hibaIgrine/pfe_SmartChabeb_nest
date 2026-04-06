@@ -19,6 +19,7 @@ export class EventsService {
   ) {}
 
   private readonly pointsPerParticipation = 10;
+  private readonly timeRegex = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
 
   private readonly participantStatuses = [
     'EN_ATTENTE',
@@ -93,6 +94,104 @@ export class EventsService {
     const datePart = date.toISOString().split('T')[0];
     const normalizedTime = time.length === 5 ? `${time}:00` : time;
     return new Date(`${datePart}T${normalizedTime}`);
+  }
+
+  private normalizeTimeToHHMM(value: string) {
+    const [h, m] = value.split(':');
+    return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
+  }
+
+  private timeToMinutes(value: string) {
+    const normalized = this.normalizeTimeToHHMM(value);
+    const [h, m] = normalized.split(':').map(Number);
+    return h * 60 + m;
+  }
+
+  private normalizeTimeline(
+    timeline:
+      | Array<{
+          title: string;
+          start_time: string;
+          end_time: string;
+          details?: string;
+        }>
+      | undefined,
+    eventStartTime: string,
+    eventEndTime: string,
+  ) {
+    if (timeline === undefined) return undefined;
+    if (timeline.length === 0) return [];
+
+    const eventStartMinutes = this.timeToMinutes(eventStartTime);
+    const eventEndMinutes = this.timeToMinutes(eventEndTime);
+
+    const normalized = timeline.map((step, index) => {
+      const title = (step.title ?? '').trim();
+      const startTime = this.normalizeTimeToHHMM(step.start_time ?? '');
+      const endTime = this.normalizeTimeToHHMM(step.end_time ?? '');
+      const details = step.details?.trim() || undefined;
+
+      if (!title) {
+        throw new BadRequestException(
+          `Timeline etape ${index + 1}: titre obligatoire`,
+        );
+      }
+
+      if (
+        !this.timeRegex.test(step.start_time) ||
+        !this.timeRegex.test(step.end_time)
+      ) {
+        throw new BadRequestException(
+          `Timeline etape ${index + 1}: format horaire invalide (HH:mm ou HH:mm:ss)`,
+        );
+      }
+
+      const startMinutes = this.timeToMinutes(startTime);
+      const endMinutes = this.timeToMinutes(endTime);
+
+      if (endMinutes <= startMinutes) {
+        throw new BadRequestException(
+          `Timeline etape ${index + 1}: l'heure de fin doit etre superieure a l'heure de debut`,
+        );
+      }
+
+      if (startMinutes < eventStartMinutes || endMinutes > eventEndMinutes) {
+        throw new BadRequestException(
+          `Timeline etape ${index + 1}: doit etre comprise entre ${this.normalizeTimeToHHMM(eventStartTime)} et ${this.normalizeTimeToHHMM(eventEndTime)}`,
+        );
+      }
+
+      return {
+        title,
+        start_time: startTime,
+        end_time: endTime,
+        details,
+        startMinutes,
+        endMinutes,
+      };
+    });
+
+    const sorted = [...normalized].sort(
+      (a, b) => a.startMinutes - b.startMinutes,
+    );
+
+    for (let i = 1; i < sorted.length; i++) {
+      const previous = sorted[i - 1];
+      const current = sorted[i];
+
+      if (current.startMinutes < previous.endMinutes) {
+        throw new BadRequestException(
+          `Timeline invalide: chevauchement entre "${previous.title}" et "${current.title}"`,
+        );
+      }
+    }
+
+    return sorted.map(({ title, start_time, end_time, details }) => ({
+      title,
+      start_time,
+      end_time,
+      details,
+    }));
   }
 
   private async findConflicts(
@@ -386,6 +485,12 @@ export class EventsService {
       dto.recurrence_until,
     );
 
+    const timeline = this.normalizeTimeline(
+      dto.timeline,
+      dto.start_time,
+      dto.end_time,
+    );
+
     const conflictsSummary: string[] = [];
     for (const occurrenceDate of occurrenceDates) {
       const occurrenceStart = this.buildTimeOnDate(
@@ -430,6 +535,10 @@ export class EventsService {
             start_time: occurrenceStart,
             end_time: occurrenceEnd,
             capacity: dto.capacity,
+            timeline:
+              timeline === undefined
+                ? undefined
+                : (timeline as Prisma.InputJsonValue),
             club_id: dto.club_id,
             locaux_id: dto.locaux_id,
             created_by: userId,
@@ -960,6 +1069,8 @@ export class EventsService {
       endTime,
     );
 
+    const timeline = this.normalizeTimeline(dto.timeline, startTime, endTime);
+
     const conflicts = await this.findConflicts(
       nextLocalId,
       eventDate,
@@ -983,6 +1094,9 @@ export class EventsService {
         start_time: startDateTime,
         end_time: endDateTime,
         capacity: dto.capacity ?? existing.capacity,
+        ...(timeline !== undefined
+          ? { timeline: timeline as Prisma.InputJsonValue }
+          : {}),
         club_id: nextClubId,
         locaux_id: nextLocalId,
       },

@@ -1,13 +1,17 @@
 import {
+  IsArray,
   IsInt,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
   Matches,
   Min,
-  IsIn,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { EventTimelineStepDto } from './event-timeline-step.dto';
 
 export class CreateEventDto {
   @IsString()
@@ -60,4 +64,10 @@ export class CreateEventDto {
     message: 'recurrence_until doit respecter le format YYYY-MM-DD',
   })
   recurrence_until?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => EventTimelineStepDto)
+  timeline?: EventTimelineStepDto[];
 }

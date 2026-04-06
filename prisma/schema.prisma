@@ -239,6 +239,7 @@ model events {
   start_time    DateTime @db.Timestamp(6)
   end_time      DateTime @db.Timestamp(6)
   capacity      Int?
+  timeline      Json?
   is_active     Boolean  @default(true)
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
