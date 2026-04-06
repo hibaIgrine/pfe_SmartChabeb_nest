@@ -87,6 +87,7 @@ export class UsersService {
         prenom: true,
         photo_profil_url: true,
         points: true,
+        id_centre: true,
       },
     });
 
@@ -98,10 +99,15 @@ export class UsersService {
     const badge = this.resolveBadge(points);
     const nextBadge = this.resolveNextBadge(points);
 
+    const rankScopeWhere = {
+      compte_actif: true,
+      ...(user.id_centre ? { id_centre: user.id_centre } : {}),
+    };
+
     const higherCount = await this.prisma.utilisateurs.count({
       where: {
+        ...rankScopeWhere,
         points: { gt: points },
-        compte_actif: true,
       },
     });
 
@@ -119,21 +125,41 @@ export class UsersService {
     };
   }
 
-  async getGamificationLeaderboard(limit = 10) {
+  async getGamificationLeaderboard(userId: string, limit = 10) {
     const safeLimit = Math.min(Math.max(limit, 3), 50);
+
+    const requester = await this.prisma.utilisateurs.findUnique({
+      where: { id: userId },
+      select: { id_centre: true, role: true },
+    });
+
+    const leaderboardScopeWhere = {
+      compte_actif: true,
+      ...(requester?.role !== 'ADMIN' && requester?.id_centre
+        ? { id_centre: requester.id_centre }
+        : {}),
+    };
+
+    const effectiveLimit = requester?.role === 'ADMIN' ? 1000 : safeLimit;
+
     const leaderboard = await this.prisma.utilisateurs.findMany({
-      where: {
-        compte_actif: true,
-      },
+      where: leaderboardScopeWhere,
       select: {
         id: true,
         nom: true,
         prenom: true,
         points: true,
         photo_profil_url: true,
+        centre: {
+          select: {
+            id: true,
+            nom: true,
+            gouvernorat: true,
+          },
+        },
       },
       orderBy: [{ points: 'desc' }, { nom: 'asc' }],
-      take: safeLimit,
+      take: effectiveLimit,
     });
 
     return leaderboard.map((item, index) => {
@@ -146,6 +172,7 @@ export class UsersService {
         photo_profil_url: item.photo_profil_url,
         points,
         badge: this.resolveBadge(points),
+        centre: item.centre,
       };
     });
   }
