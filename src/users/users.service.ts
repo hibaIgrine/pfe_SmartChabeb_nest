@@ -306,6 +306,30 @@ export class UsersService {
         });
       }
 
+      // 🛡️ CAS DU RESPONSABLE_CENTRE : vue des membres de son propre centre uniquement
+      if (requesterRole === 'RESPONSABLE_CENTRE' && requesterId) {
+        const responsable = await this.prisma.utilisateurs.findUnique({
+          where: { id: requesterId },
+          select: { id_centre: true },
+        });
+
+        if (!responsable || !responsable.id_centre) return [];
+
+        return await this.prisma.utilisateurs.findMany({
+          where: { id_centre: responsable.id_centre },
+          include: {
+            centre: {
+              select: { id: true, nom: true, gouvernorat: true },
+            },
+            inscriptions_clubs: { include: { club: true } },
+            clubs_diriges: {
+              select: { id: true, nom: true },
+            },
+          },
+          orderBy: { nom: 'asc' },
+        });
+      }
+
       // 🛡️ CAS DE L'ADMIN : Vue globale
       return await this.prisma.utilisateurs.findMany({
         include: {

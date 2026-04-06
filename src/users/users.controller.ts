@@ -133,7 +133,7 @@ export class UsersController {
 
   @Get()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles('ADMIN', 'COACH', 'GESTIONNAIRE')
+  @Roles('ADMIN', 'COACH', 'GESTIONNAIRE', 'RESPONSABLE_CENTRE')
   findAll(@Request() req: any) {
     return this.usersService.findAll(req.user.userId, req.user.role);
   }
