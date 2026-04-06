@@ -216,18 +216,18 @@ export class ReservationsService {
    * 📋 LISTER LES RÉSERVATIONS
    */
   async findAll(userId?: string, role?: string) {
-    if (role === 'ADMIN') {
-      return await this.prisma.reservations_locaux.findMany({
-        include: {
-          utilisateur: { select: { nom: true, prenom: true, email: true } },
-          local: { include: { centre: true } },
-        },
-        orderBy: { date_creation: 'desc' },
-      });
+    if (!userId) {
+      return [];
     }
+
+    const where = await this.buildReservationScopeWhere(userId, role);
+
     return await this.prisma.reservations_locaux.findMany({
-      where: { id_utilisateur: userId },
-      include: { local: true },
+      where,
+      include: {
+        utilisateur: { select: { nom: true, prenom: true, email: true } },
+        local: { include: { centre: true } },
+      },
       orderBy: { date_creation: 'desc' },
     });
   }
