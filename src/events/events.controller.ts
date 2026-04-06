@@ -63,6 +63,15 @@ export class EventsController {
     );
   }
 
+  @Get('stats/dashboard')
+  getDashboardStats(
+    @Request() req: any,
+    @Query('includeInactive') includeInactive?: string,
+  ) {
+    const include = String(includeInactive).toLowerCase() === 'true';
+    return this.eventsService.getDashboardStats(req.user.userId, include);
+  }
+
   @Get(':id')
   findOne(@Request() req: any, @Param('id') id: string) {
     return this.eventsService.findOne(req.user.userId, id);

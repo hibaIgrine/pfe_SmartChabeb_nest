@@ -398,6 +398,88 @@ export class EventsService {
     });
   }
 
+  async getDashboardStats(userId: string, includeInactive = false) {
+    const requester = await this.resolveRequester(userId);
+    const where = await this.buildVisibilityWhere(requester, includeInactive);
+
+    const events = await this.prisma.events.findMany({
+      where,
+      select: {
+        id: true,
+        nom: true,
+        capacity: true,
+        participants: {
+          select: {
+            status: true,
+          },
+        },
+      },
+    });
+
+    const totalEvents = events.length;
+    let participantsCount = 0;
+    let totalConfirmed = 0;
+    let totalCapacity = 0;
+    let eventsWithParticipants = 0;
+
+    const popularEvents = events
+      .map((event) => {
+        const confirmed = event.participants.filter(
+          (participant) => participant.status === 'CONFIRME',
+        ).length;
+        const waiting = event.participants.filter(
+          (participant) => participant.status === 'EN_ATTENTE',
+        ).length;
+
+        const participants = confirmed + waiting;
+        const capacity =
+          typeof event.capacity === 'number' ? event.capacity : 0;
+        const fillRate =
+          capacity > 0 ? Number(((confirmed / capacity) * 100).toFixed(1)) : 0;
+
+        participantsCount += participants;
+        totalConfirmed += confirmed;
+
+        if (capacity > 0) {
+          totalCapacity += capacity;
+        }
+
+        if (participants > 0) {
+          eventsWithParticipants += 1;
+        }
+
+        return {
+          id: event.id,
+          nom: event.nom,
+          participants,
+          confirmed,
+          waiting,
+          capacity,
+          fillRate,
+        };
+      })
+      .sort((a, b) => b.participants - a.participants)
+      .slice(0, 5);
+
+    const tauxParticipation =
+      totalEvents > 0
+        ? Number(((eventsWithParticipants / totalEvents) * 100).toFixed(1))
+        : 0;
+
+    const tauxRemplissage =
+      totalCapacity > 0
+        ? Number(((totalConfirmed / totalCapacity) * 100).toFixed(1))
+        : 0;
+
+    return {
+      nombreEvenements: totalEvents,
+      nombreParticipants: participantsCount,
+      tauxParticipation,
+      tauxRemplissage,
+      evenementsPopulaires: popularEvents,
+    };
+  }
+
   async findMyParticipations(userId: string, includeInactive = true) {
     await this.resolveRequester(userId);
 
