@@ -65,6 +65,20 @@ export class UsersController {
     return await this.usersService.findOne(req.user.userId);
   }
 
+  @Get('me/gamification')
+  @UseGuards(AuthGuard('jwt'))
+  async getMyGamification(@Request() req: any) {
+    return await this.usersService.getGamificationProfile(req.user.userId);
+  }
+
+  @Get('gamification/leaderboard')
+  @UseGuards(AuthGuard('jwt'))
+  async getGamificationLeaderboard(@Request() req: any) {
+    const role = req?.user?.role;
+    const limit = role === 'ADMIN' ? 20 : 10;
+    return await this.usersService.getGamificationLeaderboard(limit);
+  }
+
   @Patch('me/assign-centre') // 💡 salle -> centre
   async assignCentreByEmail(@Body() body: any) {
     return await this.usersService.assignToCentreByEmail(

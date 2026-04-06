@@ -102,6 +102,11 @@ export class EventsController {
     return this.eventsService.cancelMyRegistration(id, req.user.userId);
   }
 
+  @Patch(':id/participants/me/checkin')
+  selfCheckin(@Request() req: any, @Param('id') id: string) {
+    return this.eventsService.selfCheckin(id, req.user.userId);
+  }
+
   @Get(':id/participants')
   listParticipants(@Request() req: any, @Param('id') id: string) {
     return this.eventsService.listParticipants(id, req.user.userId);

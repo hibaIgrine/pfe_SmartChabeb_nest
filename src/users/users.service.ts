@@ -15,6 +15,141 @@ export class UsersService {
     private mailerService: MailerService,
   ) {}
 
+  private resolveBadge(points: number) {
+    if (points >= 500) {
+      return {
+        key: 'LEGEND',
+        label: 'Legende',
+        minPoints: 500,
+      };
+    }
+    if (points >= 250) {
+      return {
+        key: 'ELITE',
+        label: 'Elite',
+        minPoints: 250,
+      };
+    }
+    if (points >= 100) {
+      return {
+        key: 'ACTIVE',
+        label: 'Actif',
+        minPoints: 100,
+      };
+    }
+    return {
+      key: 'STARTER',
+      label: 'Debutant',
+      minPoints: 0,
+    };
+  }
+
+  private resolveNextBadge(points: number) {
+    const nextThreshold =
+      points < 100 ? 100 : points < 250 ? 250 : points < 500 ? 500 : null;
+    if (!nextThreshold) {
+      return {
+        label: 'Maximum atteint',
+        targetPoints: null,
+        remainingPoints: 0,
+        progressPercent: 100,
+      };
+    }
+
+    const previousThreshold =
+      nextThreshold === 100 ? 0 : nextThreshold === 250 ? 100 : 250;
+    const span = nextThreshold - previousThreshold;
+    const currentInSpan = Math.max(points - previousThreshold, 0);
+    const progressPercent = Math.min(
+      100,
+      Math.round((currentInSpan / span) * 100),
+    );
+
+    return {
+      label:
+        nextThreshold === 100
+          ? 'Actif'
+          : nextThreshold === 250
+            ? 'Elite'
+            : 'Legende',
+      targetPoints: nextThreshold,
+      remainingPoints: Math.max(nextThreshold - points, 0),
+      progressPercent,
+    };
+  }
+
+  async getGamificationProfile(userId: string) {
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        nom: true,
+        prenom: true,
+        photo_profil_url: true,
+        points: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    const points = user.points ?? 0;
+    const badge = this.resolveBadge(points);
+    const nextBadge = this.resolveNextBadge(points);
+
+    const higherCount = await this.prisma.utilisateurs.count({
+      where: {
+        points: { gt: points },
+        compte_actif: true,
+      },
+    });
+
+    return {
+      user: {
+        id: user.id,
+        nom: user.nom,
+        prenom: user.prenom,
+        photo_profil_url: user.photo_profil_url,
+      },
+      points,
+      badge,
+      nextBadge,
+      rank: higherCount + 1,
+    };
+  }
+
+  async getGamificationLeaderboard(limit = 10) {
+    const safeLimit = Math.min(Math.max(limit, 3), 50);
+    const leaderboard = await this.prisma.utilisateurs.findMany({
+      where: {
+        compte_actif: true,
+      },
+      select: {
+        id: true,
+        nom: true,
+        prenom: true,
+        points: true,
+        photo_profil_url: true,
+      },
+      orderBy: [{ points: 'desc' }, { nom: 'asc' }],
+      take: safeLimit,
+    });
+
+    return leaderboard.map((item, index) => {
+      const points = item.points ?? 0;
+      return {
+        rank: index + 1,
+        id: item.id,
+        nom: item.nom,
+        prenom: item.prenom,
+        photo_profil_url: item.photo_profil_url,
+        points,
+        badge: this.resolveBadge(points),
+      };
+    });
+  }
+
   // ==========================================
   // 1. CRÉATION (Inscription Mobile Adhérent)
   // ==========================================

@@ -36,6 +36,7 @@ model utilisateurs {
   code_verification   String?               @db.VarChar(6)
   reset_token         String?               @db.VarChar(6)
   reset_token_expires DateTime?
+  points              Int                   @default(0)
 
   // Relations
   id_role             String?               @db.Uuid
@@ -261,6 +262,7 @@ model event_participants {
   id           String    @id @default(uuid()) @db.Uuid
   status       String    @default("INVITED") @db.VarChar(20)
   checkin      Boolean   @default(false)
+  points_awarded Boolean @default(false)
   created_at   DateTime  @default(now())
   updated_at   DateTime  @updatedAt
 

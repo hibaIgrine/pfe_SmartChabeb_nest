@@ -65,6 +65,13 @@ type EventCancellationPayload = {
   responsableId?: string;
 };
 
+type PointsEarnedPayload = {
+  utilisateurId: string;
+  eventId: string;
+  eventNom: string;
+  points: number;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -345,6 +352,31 @@ export class NotificationsService {
           startTime: payload.startTime.toISOString(),
           endTime: payload.endTime.toISOString(),
           responsableId: payload.responsableId ?? null,
+        },
+      },
+      select: {
+        id: true,
+        titre: true,
+        message: true,
+        type: true,
+        is_read: true,
+        created_at: true,
+        data: true,
+      },
+    });
+  }
+
+  async createPointsEarnedNotification(payload: PointsEarnedPayload) {
+    return this.prisma.notifications.create({
+      data: {
+        id_utilisateur: payload.utilisateurId,
+        type: 'POINTS_EARNED',
+        titre: 'Points gagnes',
+        message: `Bravo ! Vous avez gagne ${payload.points} points pour votre participation a l'evenement ${payload.eventNom}.`,
+        data: {
+          eventId: payload.eventId,
+          eventNom: payload.eventNom,
+          points: payload.points,
         },
       },
       select: {

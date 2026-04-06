@@ -18,6 +18,8 @@ export class EventsService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  private readonly pointsPerParticipation = 10;
+
   private readonly participantStatuses = [
     'EN_ATTENTE',
     'CONFIRME',
@@ -1470,9 +1472,237 @@ export class EventsService {
       );
     }
 
+    // Verify event is ongoing when marking as present
+    if (checkin) {
+      const now = new Date();
+      const startTime = new Date(event.start_time);
+      const endTime = new Date(event.end_time);
+
+      if (now < startTime) {
+        throw new BadRequestException(
+          `L'événement commence le ${startTime.toLocaleString('fr-FR')}. Vous ne pouvez pas marquer la présence maintenant.`,
+        );
+      }
+
+      if (now > endTime) {
+        throw new BadRequestException(
+          `L'événement s'est terminé le ${endTime.toLocaleString('fr-FR')}. Vous ne pouvez plus marquer la présence.`,
+        );
+      }
+    }
+
+    // Award points only once for the first successful check-in on this event.
+    if (checkin) {
+      const awarded = await this.prisma.$transaction(async (tx) => {
+        const updatedRows = await tx.$queryRaw<Array<{ user_id: string }>>(
+          Prisma.sql`
+            UPDATE event_participants
+            SET checkin = true,
+                points_awarded = true,
+                updated_at = NOW()
+            WHERE id = ${participant.id}::uuid
+              AND event_id = ${eventId}::uuid
+              AND status = 'CONFIRME'
+              AND points_awarded = false
+            RETURNING user_id
+          `,
+        );
+
+        if (updatedRows.length === 0) {
+          return null;
+        }
+
+        const awardedUserId = updatedRows[0].user_id;
+        await tx.$executeRaw(
+          Prisma.sql`
+            UPDATE utilisateurs
+            SET points = COALESCE(points, 0) + ${this.pointsPerParticipation}
+            WHERE id = ${awardedUserId}::uuid
+          `,
+        );
+
+        const updatedParticipant = await tx.event_participants.findUnique({
+          where: { id: participant.id },
+          include: {
+            user: {
+              select: {
+                id: true,
+                nom: true,
+                prenom: true,
+                email: true,
+                role: true,
+              },
+            },
+          },
+        });
+
+        return {
+          awardedUserId,
+          updatedParticipant,
+        };
+      });
+
+      if (awarded?.awardedUserId) {
+        try {
+          await this.notificationsService.createPointsEarnedNotification({
+            utilisateurId: awarded.awardedUserId,
+            eventId,
+            eventNom: event.nom,
+            points: this.pointsPerParticipation,
+          });
+        } catch (error) {
+          console.error(
+            'Erreur creation notification points evenement :',
+            error,
+          );
+        }
+      }
+
+      if (awarded?.updatedParticipant) {
+        return awarded.updatedParticipant;
+      }
+    }
+
     return this.prisma.event_participants.update({
       where: { id: participant.id },
       data: { checkin },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+    });
+  }
+
+  async selfCheckin(eventId: string, userId: string) {
+    const event = await this.prisma.events.findUnique({
+      where: { id: eventId },
+      select: {
+        id: true,
+        nom: true,
+        start_time: true,
+        end_time: true,
+        is_active: true,
+      },
+    });
+
+    if (!event) {
+      throw new NotFoundException('Evenement introuvable');
+    }
+
+    if (!event.is_active) {
+      throw new BadRequestException('Evenement inactif');
+    }
+
+    const now = new Date();
+    if (now < event.start_time) {
+      throw new BadRequestException(
+        "L'evenement n'a pas encore commencé. Vous pourrez vous marquer present lors du deroulement de l'event.",
+      );
+    }
+
+    if (now > event.end_time) {
+      throw new BadRequestException(
+        "L'evenement est terminé. Vous ne pouvez plus vous marquer present.",
+      );
+    }
+
+    const participant = await this.prisma.event_participants.findFirst({
+      where: { event_id: eventId, user_id: userId },
+    });
+
+    if (!participant) {
+      throw new NotFoundException("Vous n'etes pas inscrit a cet evenement");
+    }
+
+    if (participant.status !== 'CONFIRME') {
+      throw new BadRequestException(
+        'Seuls les participants confirmes peuvent se marquer presents',
+      );
+    }
+
+    if (participant.checkin) {
+      throw new BadRequestException('Vous etes deja marque present');
+    }
+
+    // Award points only once for self check-in
+    const awarded = await this.prisma.$transaction(async (tx) => {
+      const updatedRows = await tx.$queryRaw<Array<{ user_id: string }>>(
+        Prisma.sql`
+          UPDATE event_participants
+          SET checkin = true,
+              points_awarded = true,
+              updated_at = NOW()
+          WHERE id = ${participant.id}::uuid
+            AND event_id = ${eventId}::uuid
+            AND status = 'CONFIRME'
+            AND points_awarded = false
+          RETURNING user_id
+        `,
+      );
+
+      if (updatedRows.length === 0) {
+        return null;
+      }
+
+      const awardedUserId = updatedRows[0].user_id;
+      await tx.$executeRaw(
+        Prisma.sql`
+          UPDATE utilisateurs
+          SET points = COALESCE(points, 0) + ${this.pointsPerParticipation}
+          WHERE id = ${awardedUserId}::uuid
+        `,
+      );
+
+      const updatedParticipant = await tx.event_participants.findUnique({
+        where: { id: participant.id },
+        include: {
+          user: {
+            select: {
+              id: true,
+              nom: true,
+              prenom: true,
+              email: true,
+              role: true,
+            },
+          },
+        },
+      });
+
+      return {
+        awardedUserId,
+        updatedParticipant,
+      };
+    });
+
+    if (awarded?.awardedUserId) {
+      try {
+        await this.notificationsService.createPointsEarnedNotification({
+          utilisateurId: awarded.awardedUserId,
+          eventId,
+          eventNom: event.nom,
+          points: this.pointsPerParticipation,
+        });
+      } catch (error) {
+        console.error(
+          'Erreur creation notification points self-checkin :',
+          error,
+        );
+      }
+    }
+
+    if (awarded?.updatedParticipant) {
+      return awarded.updatedParticipant;
+    }
+
+    return this.prisma.event_participants.findUnique({
+      where: { id: participant.id },
       include: {
         user: {
           select: {
