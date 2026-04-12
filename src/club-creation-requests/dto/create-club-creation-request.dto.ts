@@ -20,6 +20,10 @@ export class CreateClubCreationRequestDto {
   @IsNotEmpty()
   description: string;
 
+  @IsString()
+  @IsNotEmpty()
+  objectifs: string;
+
   @IsOptional()
   @IsString()
   planning_souhaite?: string;

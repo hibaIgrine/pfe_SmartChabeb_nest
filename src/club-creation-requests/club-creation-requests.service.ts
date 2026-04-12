@@ -161,6 +161,36 @@ export class ClubCreationRequestsService {
     }
   }
 
+  private parseObjectives(raw: string): string[] {
+    if (!raw || typeof raw !== 'string') {
+      throw new BadRequestException('Les objectifs du club sont obligatoires.');
+    }
+
+    let objectives: string[] = [];
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        objectives = parsed
+          .map((value) => (typeof value === 'string' ? value.trim() : ''))
+          .filter(Boolean);
+      }
+    } catch {
+      objectives = raw
+        .split(/\r?\n|,|;/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+    }
+
+    if (objectives.length === 0) {
+      throw new BadRequestException(
+        'Ajoutez au moins un objectif pour le club.',
+      );
+    }
+
+    return objectives;
+  }
+
   async create(
     userId: string,
     role: string,
@@ -207,6 +237,7 @@ export class ClubCreationRequestsService {
     const cvFile = files?.cv?.[0];
     const attestationFile = files?.attestation?.[0];
     const slot = this.resolveRecurringSlot(dto);
+    const objectifs = this.parseObjectives(dto.objectifs);
 
     let parsedPlanning: any = null;
     if (dto.planning_souhaite) {
@@ -231,6 +262,7 @@ export class ClubCreationRequestsService {
         description: dto.description,
         planning_souhaite: {
           ...planningObject,
+          objectifs,
           mode: 'HEBDOMADAIRE',
           jour_recurrent: dto.jour_recurrent,
           heure_debut: dto.heure_debut_souhaitee,
@@ -448,13 +480,21 @@ export class ClubCreationRequestsService {
       });
 
       const officialClub = existingClub
-        ? existingClub
+        ? await tx.clubs.update({
+            where: { id: existingClub.id },
+            data: {
+              id_coach: current.id_demandeur,
+              est_actif: true,
+            },
+            select: { id: true },
+          })
         : await tx.clubs.create({
             data: {
               nom: current.nom_club,
               description: current.description,
               categorie: current.categorie,
               id_centre: clubCentreId,
+              id_coach: current.id_demandeur,
               planning: current.planning_souhaite ?? {
                 mode: 'HEBDOMADAIRE',
                 jour_recurrent:
@@ -469,7 +509,13 @@ export class ClubCreationRequestsService {
               locale_fixe: current.local_souhaite?.nom,
               est_actif: true,
             },
+            select: { id: true },
           });
+
+      await tx.utilisateurs.update({
+        where: { id: current.id_demandeur },
+        data: { role: 'RESPONSABLE_CLUB' },
+      });
 
       const updatedRequest = await (tx as any).demandes_creation_clubs.update({
         where: { id },
