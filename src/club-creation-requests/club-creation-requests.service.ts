@@ -324,7 +324,9 @@ export class ClubCreationRequestsService {
     const current = await this.getTable().findUnique({
       where: { id },
       include: {
-        local_souhaite: { select: { id: true, nom: true, prix_heure: true } },
+        local_souhaite: {
+          select: { id: true, nom: true, prix_heure: true, id_centre: true },
+        },
       },
     });
 
@@ -429,6 +431,46 @@ export class ClubCreationRequestsService {
         );
       }
 
+      const clubCentreId =
+        current.id_centre ?? current.local_souhaite?.id_centre;
+      if (!clubCentreId) {
+        throw new BadRequestException(
+          'Impossible de créer le club officiel: centre introuvable.',
+        );
+      }
+
+      const existingClub = await tx.clubs.findFirst({
+        where: {
+          nom: current.nom_club,
+          id_centre: clubCentreId,
+        },
+        select: { id: true },
+      });
+
+      const officialClub = existingClub
+        ? existingClub
+        : await tx.clubs.create({
+            data: {
+              nom: current.nom_club,
+              description: current.description,
+              categorie: current.categorie,
+              id_centre: clubCentreId,
+              planning: current.planning_souhaite ?? {
+                mode: 'HEBDOMADAIRE',
+                jour_recurrent:
+                  (current.planning_souhaite as any)?.jour_recurrent ??
+                  undefined,
+                heure_debut:
+                  (current.planning_souhaite as any)?.heure_debut ?? undefined,
+                heure_fin:
+                  (current.planning_souhaite as any)?.heure_fin ?? undefined,
+                recurrence: 'TOUTE_L_ANNEE',
+              },
+              locale_fixe: current.local_souhaite?.nom,
+              est_actif: true,
+            },
+          });
+
       const updatedRequest = await (tx as any).demandes_creation_clubs.update({
         where: { id },
         data: {
@@ -441,6 +483,7 @@ export class ClubCreationRequestsService {
       return {
         ...updatedRequest,
         planning_reservations_created: planningInsert.count,
+        official_club_id: officialClub.id,
       };
     });
   }
