@@ -5,11 +5,11 @@ import { Reflector } from '@nestjs/core';
 export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
 
-  // Changé 'bool' en 'boolean'
+  // Recupere les roles requis et autorise l'acces seulement si l'utilisateur en fait partie.
   canActivate(context: ExecutionContext): boolean {
     const requiredRoles = this.reflector.getAllAndOverride<string[]>('roles', [
       context.getHandler(),
-      context.getClass(), // Changé 'getController' en 'getClass'
+      context.getClass(),
     ]);
 
     if (!requiredRoles) {
@@ -17,7 +17,7 @@ export class RolesGuard implements CanActivate {
     }
 
     const { user } = context.switchToHttp().getRequest();
-    // On vérifie si l'utilisateur existe et si son rôle est dans la liste autorisée
+    // Si aucun utilisateur n'est injecte par le JWT, ou si son role ne correspond pas, on refuse.
     return user && requiredRoles.some((role) => user.role === role);
   }
 }

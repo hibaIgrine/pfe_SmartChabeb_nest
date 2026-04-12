@@ -7,12 +7,16 @@ import {
   MaxLength,
 } from 'class-validator';
 
+/**
+ * DTO utilise pour enregistrer la presence d'un membre.
+ * Les identifiants de club et d'utilisateur sont obligatoires, la date reste optionnelle.
+ */
 export class MarkPresenceDto {
   @IsUUID()
-  id_club: string;
+  id_club!: string;
 
   @IsUUID()
-  id_utilisateur: string;
+  id_utilisateur!: string;
 
   @IsOptional()
   @IsString()
@@ -21,7 +25,7 @@ export class MarkPresenceDto {
 
   @IsString()
   @IsIn(['PRESENT', 'ABSENT'])
-  statut: 'PRESENT' | 'ABSENT';
+  statut!: 'PRESENT' | 'ABSENT';
 
   @IsOptional()
   @IsString()

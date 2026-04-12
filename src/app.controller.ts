@@ -1,6 +1,10 @@
 import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
 
+/**
+ * Controleur minimal pour verifier que l'application repond.
+ * Il delegue toute la logique au AppService.
+ */
 @Controller()
 export class AppController {
   constructor(private readonly appService: AppService) {}

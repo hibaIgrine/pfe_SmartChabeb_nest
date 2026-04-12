@@ -20,6 +20,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
+  // Recharge l'utilisateur a partir du JWT et bloque l'acces si le compte est encore banni.
   async validate(payload: any) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { id: payload.sub },

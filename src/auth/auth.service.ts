@@ -17,6 +17,7 @@ export class AuthService {
     private mailerService: MailerService,
   ) {}
 
+  // Verifie l'identite, le statut du compte et genere un token JWT.
   async login(email: string, pass: string) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { email },
@@ -54,6 +55,7 @@ export class AuthService {
     };
   }
 
+  // Confirme l'email de l'utilisateur avec le code qui lui a ete envoye.
   async verifyCode(email: string, code: string) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { email },
@@ -69,6 +71,7 @@ export class AuthService {
     throw new UnauthorizedException('Code incorrect');
   }
 
+  // Genere un code de reinitialisation et l'envoie par email.
   async forgotPassword(email: string) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { email },
@@ -104,6 +107,7 @@ export class AuthService {
     return { message: 'Code de réinitialisation envoyé par email.' };
   }
 
+  // Verifie le code de reset puis remplace l'ancien mot de passe par un nouveau hash.
   async resetPassword(email: string, token: string, newPass: string) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { email },

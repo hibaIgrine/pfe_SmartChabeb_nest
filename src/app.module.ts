@@ -17,6 +17,7 @@ import { PresencesModule } from './presences/presences.module';
 
 import { NotificationsModule } from './notifications/notifications.module';
 import { EventsModule } from './events/events.module';
+import { ClubCreationRequestsModule } from './club-creation-requests/club-creation-requests.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { EventsModule } from './events/events.module';
     ReservationsModule,
     PresencesModule,
     EventsModule,
+    ClubCreationRequestsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

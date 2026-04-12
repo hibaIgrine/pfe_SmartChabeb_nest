@@ -53,8 +53,17 @@ export class LocauxService {
 
     // 🛡️ SÉCURITÉ : Si l'utilisateur n'est pas ADMIN
     if (user.role !== 'ADMIN') {
-      // On ignore le filtre demandé et on force son propre centre
-      idToFilter = user.id_centre;
+      // On ignore le filtre demandé et on force le centre rattaché au compte connecté.
+      const requester = await this.prisma.utilisateurs.findUnique({
+        where: { id: user.userId },
+        select: { id_centre: true },
+      });
+
+      idToFilter = requester?.id_centre ?? undefined;
+
+      if (!idToFilter) {
+        return [];
+      }
     }
 
     return await this.prisma.locaux.findMany({

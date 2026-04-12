@@ -11,6 +11,7 @@ import { MarkPresenceDto } from './dto/mark-presence.dto';
 export class PresencesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  // Echappe une valeur avant export CSV pour eviter de casser les colonnes.
   private escapeCsv(value: unknown): string {
     const raw = value === null || value === undefined ? '' : String(value);
     if (/[",\n\r]/.test(raw)) {
@@ -19,6 +20,7 @@ export class PresencesService {
     return raw;
   }
 
+  // Normalise une date texte au format UTC YYYY-MM-DD.
   private normalizeDate(input?: string): Date {
     const raw =
       input && input.trim() ? input.trim() : this.formatDate(new Date());
@@ -33,26 +35,31 @@ export class PresencesService {
     return new Date(`${raw}T00:00:00.000Z`);
   }
 
+  // Convertit une date JS en chaine YYYY-MM-DD.
   private formatDate(date: Date): string {
     return date.toISOString().split('T')[0];
   }
 
+  // Verifie que l'utilisateur a le droit de gerer les presences de ce club.
   private async assertCanManageClub(
     userId: string,
     clubId: string,
   ): Promise<void> {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { id: userId },
-      select: { role: true },
+      select: { role: true, id_centre: true },
     });
 
     if (!user) {
       throw new NotFoundException('Utilisateur introuvable');
     }
 
-    if (user.role !== 'RESPONSABLE_CLUB') {
+    if (
+      user.role !== 'RESPONSABLE_CLUB' &&
+      user.role !== 'RESPONSABLE_CENTRE'
+    ) {
       throw new ForbiddenException(
-        'Seul le responsable du club peut gerer les presences',
+        'Seuls les responsables du club ou du centre peuvent gerer les presences',
       );
     }
 
@@ -61,6 +68,7 @@ export class PresencesService {
       select: {
         id: true,
         id_coach: true,
+        id_centre: true,
       },
     });
 
@@ -68,31 +76,49 @@ export class PresencesService {
       throw new NotFoundException('Club introuvable');
     }
 
-    if (club.id_coach !== userId) {
+    if (user.role === 'RESPONSABLE_CLUB' && club.id_coach !== userId) {
       throw new ForbiddenException(
         'Vous ne pouvez gerer que les presences de votre club',
       );
     }
+
+    if (
+      user.role === 'RESPONSABLE_CENTRE' &&
+      (!user.id_centre || club.id_centre !== user.id_centre)
+    ) {
+      throw new ForbiddenException(
+        'Vous ne pouvez gerer que les presences des clubs de votre centre',
+      );
+    }
   }
 
+  // Retourne les clubs que cet utilisateur a le droit de gerer.
   async getManageableClubs(userId: string) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { id: userId },
-      select: { role: true },
+      select: { role: true, id_centre: true },
     });
 
     if (!user) {
       throw new NotFoundException('Utilisateur introuvable');
     }
 
-    if (user.role !== 'RESPONSABLE_CLUB') {
+    if (
+      user.role !== 'RESPONSABLE_CLUB' &&
+      user.role !== 'RESPONSABLE_CENTRE'
+    ) {
       throw new ForbiddenException(
-        'Seul le responsable du club peut consulter cette ressource',
+        'Seuls les responsables du club ou du centre peuvent consulter cette ressource',
       );
     }
 
+    const whereClause =
+      user.role === 'RESPONSABLE_CLUB'
+        ? { id_coach: userId }
+        : { id_centre: user.id_centre || '__NO_CENTRE__' };
+
     return await this.prisma.clubs.findMany({
-      where: { id_coach: userId },
+      where: whereClause,
       select: {
         id: true,
         nom: true,
@@ -117,6 +143,7 @@ export class PresencesService {
     });
   }
 
+  // Marque la presence d'un membre pour une date donnee.
   async markPresence(responsableId: string, dto: MarkPresenceDto) {
     const statut = (dto.statut || '').toUpperCase();
     if (!['PRESENT', 'ABSENT'].includes(statut)) {
@@ -173,6 +200,7 @@ export class PresencesService {
     });
   }
 
+  // Construit la liste des membres d'un club avec leur statut pour une date.
   async getMembersForDate(userId: string, clubId: string, date?: string) {
     await this.assertCanManageClub(userId, clubId);
 
@@ -250,6 +278,7 @@ export class PresencesService {
     };
   }
 
+  // Recupere l'historique complet des presences avec filtre par dates et membre.
   async getHistory(
     userId: string,
     clubId: string,
@@ -300,6 +329,7 @@ export class PresencesService {
     });
   }
 
+  // Calcule les statistiques de presence globales et par membre.
   async getStats(
     userId: string,
     clubId: string,
@@ -428,6 +458,7 @@ export class PresencesService {
     };
   }
 
+  // Prepare les donnees du jour pour un export de presence.
   async exportDailyPresence(userId: string, clubId: string, date?: string) {
     await this.assertCanManageClub(userId, clubId);
 

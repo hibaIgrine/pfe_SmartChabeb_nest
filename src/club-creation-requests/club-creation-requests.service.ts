@@ -1,0 +1,447 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { ReservationsService } from 'src/reservations/reservations.service';
+import { CreateClubCreationRequestDto } from './dto/create-club-creation-request.dto';
+import { UpdateClubCreationRequestStatusDto } from './dto/update-club-creation-request-status.dto';
+
+@Injectable()
+export class ClubCreationRequestsService {
+  private readonly weekdayIndexes: Record<string, number> = {
+    SUNDAY: 0,
+    MONDAY: 1,
+    TUESDAY: 2,
+    WEDNESDAY: 3,
+    THURSDAY: 4,
+    FRIDAY: 5,
+    SATURDAY: 6,
+  };
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly reservationsService: ReservationsService,
+  ) {}
+
+  private getTable() {
+    return (this.prisma as any).demandes_creation_clubs;
+  }
+
+  private toDate(dateStr?: string, timeStr?: string): Date | null {
+    if (!dateStr || !timeStr) return null;
+    return new Date(`${dateStr}T${timeStr}`);
+  }
+
+  private formatDateOnly(date: Date): string {
+    return date.toISOString().split('T')[0];
+  }
+
+  private getNextWeekdayDate(weekday: string): Date {
+    const targetIndex = this.weekdayIndexes[weekday];
+    if (targetIndex === undefined) {
+      throw new BadRequestException('Jour recurrent invalide');
+    }
+
+    const nextDate = new Date();
+    const currentIndex = nextDate.getDay();
+    let daysUntilTarget = (targetIndex - currentIndex + 7) % 7;
+
+    if (daysUntilTarget === 0) {
+      daysUntilTarget = 7;
+    }
+
+    nextDate.setDate(nextDate.getDate() + daysUntilTarget);
+    return nextDate;
+  }
+
+  private generateWeeklyDates(startDate: Date, occurrences = 52): Date[] {
+    const dates: Date[] = [];
+    for (let i = 0; i < occurrences; i++) {
+      const current = new Date(startDate);
+      current.setDate(startDate.getDate() + i * 7);
+      dates.push(current);
+    }
+    return dates;
+  }
+
+  private resolveStartDateForApproval(current: any): Date {
+    const planning = current?.planning_souhaite;
+    const planningWeekday =
+      planning && typeof planning === 'object'
+        ? planning.jour_recurrent || planning.jour
+        : undefined;
+
+    if (planningWeekday && this.weekdayIndexes[planningWeekday] !== undefined) {
+      return this.getNextWeekdayDate(planningWeekday);
+    }
+
+    if (!current?.date_souhaitee) {
+      throw new BadRequestException('Date de depart du planning introuvable');
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const storedDate = new Date(current.date_souhaitee);
+    storedDate.setHours(0, 0, 0, 0);
+
+    if (storedDate >= today) {
+      return storedDate;
+    }
+
+    const weekday = Object.entries(this.weekdayIndexes).find(
+      ([, dayIndex]) => dayIndex === storedDate.getDay(),
+    )?.[0];
+
+    if (weekday) {
+      return this.getNextWeekdayDate(weekday);
+    }
+
+    return today;
+  }
+
+  private resolveRecurringSlot(dto: CreateClubCreationRequestDto) {
+    if (!dto.heure_debut_souhaitee || !dto.heure_fin_souhaitee) {
+      throw new BadRequestException(
+        'heure_debut_souhaitee et heure_fin_souhaitee sont obligatoires',
+      );
+    }
+
+    const recurringDate = dto.jour_recurrent
+      ? this.getNextWeekdayDate(dto.jour_recurrent)
+      : dto.date_souhaitee
+        ? new Date(dto.date_souhaitee)
+        : null;
+
+    if (!recurringDate) {
+      throw new BadRequestException(
+        'Vous devez renseigner un jour recurrent ou une date souhaitee',
+      );
+    }
+
+    const dateStr = this.formatDateOnly(recurringDate);
+    const startDateTime = new Date(`${dateStr}T${dto.heure_debut_souhaitee}`);
+    const endDateTime = new Date(`${dateStr}T${dto.heure_fin_souhaitee}`);
+
+    if (endDateTime <= startDateTime) {
+      throw new BadRequestException(
+        'heure_fin_souhaitee doit etre strictement superieure a heure_debut_souhaitee',
+      );
+    }
+
+    return {
+      dateStr,
+      startTime: dto.heure_debut_souhaitee,
+      endTime: dto.heure_fin_souhaitee,
+      date: recurringDate,
+    };
+  }
+
+  private async ensureLocalAvailability(dto: CreateClubCreationRequestDto) {
+    if (!dto.id_local_souhaite) {
+      throw new BadRequestException('Le local souhaite est obligatoire');
+    }
+
+    const slot = this.resolveRecurringSlot(dto);
+
+    const isAvailable = await this.reservationsService.checkAvailability(
+      dto.id_local_souhaite,
+      slot.dateStr,
+      slot.startTime,
+      slot.endTime,
+    );
+
+    if (!isAvailable) {
+      throw new BadRequestException(
+        'Le local choisi est indisponible pour ce creneau horaire.',
+      );
+    }
+  }
+
+  async create(
+    userId: string,
+    role: string,
+    dto: CreateClubCreationRequestDto,
+    files?: {
+      cv?: Express.Multer.File[];
+      attestation?: Express.Multer.File[];
+    },
+  ) {
+    if (role !== 'ADHERENT') {
+      throw new ForbiddenException(
+        'Seuls les adherents peuvent soumettre une demande de creation de club.',
+      );
+    }
+
+    const requester = await this.prisma.utilisateurs.findUnique({
+      where: { id: userId },
+      select: { id_centre: true },
+    });
+
+    const local = dto.id_local_souhaite
+      ? await this.prisma.locaux.findUnique({
+          where: { id: dto.id_local_souhaite },
+          select: { id: true, id_centre: true, nom: true },
+        })
+      : null;
+
+    if (dto.id_local_souhaite && !local) {
+      throw new NotFoundException('Local souhaite introuvable');
+    }
+
+    if (
+      requester?.id_centre &&
+      local &&
+      local.id_centre !== requester.id_centre
+    ) {
+      throw new ForbiddenException(
+        'Le local selectionne ne fait pas partie de votre centre.',
+      );
+    }
+
+    await this.ensureLocalAvailability(dto);
+
+    const cvFile = files?.cv?.[0];
+    const attestationFile = files?.attestation?.[0];
+    const slot = this.resolveRecurringSlot(dto);
+
+    let parsedPlanning: any = null;
+    if (dto.planning_souhaite) {
+      try {
+        parsedPlanning = JSON.parse(dto.planning_souhaite);
+      } catch {
+        parsedPlanning = { texte: dto.planning_souhaite };
+      }
+    }
+
+    const planningObject =
+      parsedPlanning &&
+      typeof parsedPlanning === 'object' &&
+      !Array.isArray(parsedPlanning)
+        ? parsedPlanning
+        : { texte: dto.planning_souhaite };
+
+    return this.getTable().create({
+      data: {
+        nom_club: dto.nom_club,
+        categorie: dto.categorie,
+        description: dto.description,
+        planning_souhaite: {
+          ...planningObject,
+          mode: 'HEBDOMADAIRE',
+          jour_recurrent: dto.jour_recurrent,
+          heure_debut: dto.heure_debut_souhaitee,
+          heure_fin: dto.heure_fin_souhaitee,
+          recurrence: 'TOUTE_L_ANNEE',
+          date_reference: slot.dateStr,
+        },
+        id_demandeur: userId,
+        id_centre: requester?.id_centre ?? local?.id_centre ?? null,
+        id_local_souhaite: local?.id ?? null,
+        date_souhaitee: slot.date,
+        heure_debut_souhaitee: this.toDate(slot.dateStr, slot.startTime),
+        heure_fin_souhaitee: this.toDate(slot.dateStr, slot.endTime),
+        cv_url: cvFile ? `/uploads/${cvFile.filename}` : null,
+        attestation_url: attestationFile
+          ? `/uploads/${attestationFile.filename}`
+          : null,
+      },
+      include: {
+        demandeur: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            role: true,
+          },
+        },
+        local_souhaite: { select: { id: true, nom: true, type: true } },
+      },
+    });
+  }
+
+  async findMine(userId: string) {
+    return this.getTable().findMany({
+      where: { id_demandeur: userId },
+      include: {
+        local_souhaite: { select: { id: true, nom: true, type: true } },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  async findAll(requesterId: string, requesterRole: string, statut?: string) {
+    const requester = await this.prisma.utilisateurs.findUnique({
+      where: { id: requesterId },
+      select: { id_centre: true },
+    });
+
+    const where: any = {};
+    if (statut) {
+      where.statut = statut;
+    }
+
+    if (requesterRole === 'RESPONSABLE_CENTRE') {
+      if (!requester?.id_centre) {
+        return [];
+      }
+      where.id_centre = requester.id_centre;
+    }
+
+    if (requesterRole !== 'ADMIN' && requesterRole !== 'RESPONSABLE_CENTRE') {
+      throw new ForbiddenException('Acces refuse');
+    }
+
+    return this.getTable().findMany({
+      where,
+      include: {
+        demandeur: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            id_centre: true,
+          },
+        },
+        local_souhaite: { select: { id: true, nom: true, type: true } },
+        centre: { select: { id: true, nom: true } },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  async updateStatus(
+    id: string,
+    requesterId: string,
+    requesterRole: string,
+    dto: UpdateClubCreationRequestStatusDto,
+  ) {
+    const current = await this.getTable().findUnique({
+      where: { id },
+      include: {
+        local_souhaite: { select: { id: true, nom: true, prix_heure: true } },
+      },
+    });
+
+    if (!current) {
+      throw new NotFoundException('Demande introuvable');
+    }
+
+    if (current.statut !== 'EN_ATTENTE') {
+      throw new BadRequestException('Cette demande a deja ete traitee');
+    }
+
+    if (requesterRole !== 'ADMIN' && requesterRole !== 'RESPONSABLE_CENTRE') {
+      throw new ForbiddenException('Acces refuse');
+    }
+
+    if (requesterRole === 'RESPONSABLE_CENTRE') {
+      const requester = await this.prisma.utilisateurs.findUnique({
+        where: { id: requesterId },
+        select: { id_centre: true },
+      });
+
+      if (!requester?.id_centre || requester.id_centre !== current.id_centre) {
+        throw new ForbiddenException(
+          'Vous ne pouvez traiter que les demandes de votre centre',
+        );
+      }
+    }
+
+    if (dto.statut !== 'ACCEPTEE') {
+      return this.getTable().update({
+        where: { id },
+        data: {
+          statut: dto.statut,
+          commentaire_decision: dto.commentaire_decision ?? null,
+          reviewed_by: requesterId,
+        },
+      });
+    }
+
+    if (
+      !current.id_local_souhaite ||
+      !current.date_souhaitee ||
+      !current.heure_debut_souhaitee ||
+      !current.heure_fin_souhaitee
+    ) {
+      throw new BadRequestException(
+        'Impossible de valider: informations de local/horaire manquantes.',
+      );
+    }
+
+    const startTime = current.heure_debut_souhaitee
+      .toTimeString()
+      .split(' ')[0];
+    const endTime = current.heure_fin_souhaitee.toTimeString().split(' ')[0];
+    const firstOccurrenceDate = this.resolveStartDateForApproval(current);
+    const recurringDates = this.generateWeeklyDates(firstOccurrenceDate, 52);
+
+    for (const dateItem of recurringDates) {
+      const dateStr = this.formatDateOnly(dateItem);
+      const isAvailable = await this.reservationsService.checkAvailability(
+        current.id_local_souhaite,
+        dateStr,
+        startTime,
+        endTime,
+      );
+
+      if (!isAvailable) {
+        throw new BadRequestException(
+          `Le local n'est pas disponible pour le créneau du ${dateStr}.`,
+        );
+      }
+    }
+
+    const durationHours =
+      (current.heure_fin_souhaitee.getTime() -
+        current.heure_debut_souhaitee.getTime()) /
+      (1000 * 60 * 60);
+    const prixTotal = current.local_souhaite?.prix_heure
+      ? Number(current.local_souhaite.prix_heure) * durationHours
+      : 0;
+
+    return this.prisma.$transaction(async (tx) => {
+      const planningInsert = await tx.reservations_locaux.createMany({
+        data: recurringDates.map((dateItem) => {
+          const dateStr = this.formatDateOnly(dateItem);
+          return {
+            date_reservation: new Date(dateStr),
+            heure_debut: new Date(`${dateStr}T${startTime}`),
+            heure_fin: new Date(`${dateStr}T${endTime}`),
+            objet: `Créneau club validé: ${current.nom_club}`,
+            statut: 'VALIDEE',
+            prix_total: prixTotal,
+            id_local: current.id_local_souhaite as string,
+            id_utilisateur: current.id_demandeur,
+          };
+        }),
+      });
+
+      if (!planningInsert.count) {
+        throw new BadRequestException(
+          'Validation impossible: aucun créneau n a été inséré dans le planning.',
+        );
+      }
+
+      const updatedRequest = await (tx as any).demandes_creation_clubs.update({
+        where: { id },
+        data: {
+          statut: dto.statut,
+          commentaire_decision: dto.commentaire_decision ?? null,
+          reviewed_by: requesterId,
+        },
+      });
+
+      return {
+        ...updatedRequest,
+        planning_reservations_created: planningInsert.count,
+      };
+    });
+  }
+}

@@ -55,6 +55,7 @@ model utilisateurs {
   notifications       notifications[]
   presences_club      presences_clubs[]      @relation("presence_membre")
   presences_marquees  presences_clubs[]      @relation("presence_responsable")
+  demandes_creation_clubs demandes_creation_clubs[]
 }
 
 // ==========================================
@@ -77,6 +78,7 @@ model centres { // 💡 Le modèle s'appelle maintenant centres
   clubs           clubs[]
   locaux          locaux[]       // Les espaces physiques (Théâtre, Terrain)
   inventaire      equipements[]  // Le matériel du centre
+  demandes_creation_clubs demandes_creation_clubs[]
 }
 
 // ==========================================
@@ -190,6 +192,40 @@ model locaux {
   reservations   reservations_locaux[]
   events         events[]
   equipements    room_equipment[]
+  demandes_creation_clubs demandes_creation_clubs[]
+}
+
+model demandes_creation_clubs {
+  id                         String   @id @default(uuid()) @db.Uuid
+  nom_club                   String   @db.VarChar(120)
+  categorie                  String   @db.VarChar(80)
+  description                String?  @db.Text
+  planning_souhaite          Json?
+  statut                     String   @default("EN_ATTENTE") @db.VarChar(20)
+  commentaire_decision       String?  @db.Text
+  cv_url                     String?  @db.VarChar(255)
+  attestation_url            String?  @db.VarChar(255)
+  date_souhaitee             DateTime? @db.Date
+  heure_debut_souhaitee      DateTime? @db.Timestamp(6)
+  heure_fin_souhaitee        DateTime? @db.Timestamp(6)
+  created_at                 DateTime @default(now())
+  updated_at                 DateTime @updatedAt
+
+  id_demandeur               String   @db.Uuid
+  demandeur                  utilisateurs @relation(fields: [id_demandeur], references: [id], onDelete: Cascade)
+
+  id_centre                  String?  @db.Uuid
+  centre                     centres? @relation(fields: [id_centre], references: [id], onDelete: SetNull)
+
+  id_local_souhaite          String?  @db.Uuid
+  local_souhaite             locaux?  @relation(fields: [id_local_souhaite], references: [id], onDelete: SetNull)
+
+  reviewed_by                String?  @db.Uuid
+
+  @@index([id_demandeur, created_at])
+  @@index([statut, created_at])
+  @@index([id_centre, statut])
+  @@index([id_local_souhaite])
 }
 
 model equipements {
