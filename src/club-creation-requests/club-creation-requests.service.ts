@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ReservationsService } from 'src/reservations/reservations.service';
+import { NotificationsService } from 'src/notifications/notifications.service';
 import { CreateClubCreationRequestDto } from './dto/create-club-creation-request.dto';
 import { UpdateClubCreationRequestStatusDto } from './dto/update-club-creation-request-status.dto';
 
@@ -24,6 +25,7 @@ export class ClubCreationRequestsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly reservationsService: ReservationsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private getTable() {
@@ -198,6 +200,7 @@ export class ClubCreationRequestsService {
     files?: {
       cv?: Express.Multer.File[];
       attestation?: Express.Multer.File[];
+      logo?: Express.Multer.File[];
     },
   ) {
     if (role !== 'ADHERENT') {
@@ -236,6 +239,7 @@ export class ClubCreationRequestsService {
 
     const cvFile = files?.cv?.[0];
     const attestationFile = files?.attestation?.[0];
+    const logoFile = files?.logo?.[0];
     const slot = this.resolveRecurringSlot(dto);
     const objectifs = this.parseObjectives(dto.objectifs);
 
@@ -263,6 +267,8 @@ export class ClubCreationRequestsService {
         planning_souhaite: {
           ...planningObject,
           objectifs,
+          capacite: dto.capacite,
+          logo_url: logoFile ? `/uploads/${logoFile.filename}` : null,
           mode: 'HEBDOMADAIRE',
           jour_recurrent: dto.jour_recurrent,
           heure_debut: dto.heure_debut_souhaitee,
@@ -347,6 +353,25 @@ export class ClubCreationRequestsService {
     });
   }
 
+  async findCategories() {
+    const [requestCategories, clubCategories] = await Promise.all([
+      this.getTable().findMany({
+        select: { categorie: true },
+      }),
+      this.prisma.clubs.findMany({
+        select: { categorie: true },
+      }),
+    ]);
+
+    const values = [...requestCategories, ...clubCategories]
+      .map((item) => String(item.categorie || '').trim())
+      .filter(Boolean);
+
+    return Array.from(new Set(values)).sort((a, b) =>
+      a.localeCompare(b, 'fr', { sensitivity: 'base' }),
+    );
+  }
+
   async updateStatus(
     id: string,
     requesterId: string,
@@ -388,7 +413,7 @@ export class ClubCreationRequestsService {
     }
 
     if (dto.statut !== 'ACCEPTEE') {
-      return this.getTable().update({
+      const updatedRequest = await this.getTable().update({
         where: { id },
         data: {
           statut: dto.statut,
@@ -396,6 +421,24 @@ export class ClubCreationRequestsService {
           reviewed_by: requesterId,
         },
       });
+
+      try {
+        await this.notificationsService.createClubCreationDecisionNotification({
+          utilisateurId: current.id_demandeur,
+          demandeId: current.id,
+          clubNom: current.nom_club,
+          statut: 'REFUSEE',
+          commentaireDecision: dto.commentaire_decision ?? null,
+          reviewedBy: requesterId,
+        });
+      } catch (err) {
+        console.error(
+          'Erreur lors de la creation de la notification de refus:',
+          err,
+        );
+      }
+
+      return updatedRequest;
     }
 
     if (
@@ -440,7 +483,7 @@ export class ClubCreationRequestsService {
       ? Number(current.local_souhaite.prix_heure) * durationHours
       : 0;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const planningInsert = await tx.reservations_locaux.createMany({
         data: recurringDates.map((dateItem) => {
           const dateStr = this.formatDateOnly(dateItem);
@@ -459,7 +502,7 @@ export class ClubCreationRequestsService {
 
       if (!planningInsert.count) {
         throw new BadRequestException(
-          'Validation impossible: aucun créneau n a été inséré dans le planning.',
+          "Aucune réservation n'a pu être créée pour ce créneau.",
         );
       }
 
@@ -484,6 +527,13 @@ export class ClubCreationRequestsService {
             where: { id: existingClub.id },
             data: {
               id_coach: current.id_demandeur,
+              capacite:
+                Number((current.planning_souhaite as any)?.capacite) > 0
+                  ? Number((current.planning_souhaite as any)?.capacite)
+                  : null,
+              logo_url:
+                ((current.planning_souhaite as any)?.logo_url as string) ||
+                null,
               est_actif: true,
             },
             select: { id: true },
@@ -495,6 +545,13 @@ export class ClubCreationRequestsService {
               categorie: current.categorie,
               id_centre: clubCentreId,
               id_coach: current.id_demandeur,
+              capacite:
+                Number((current.planning_souhaite as any)?.capacite) > 0
+                  ? Number((current.planning_souhaite as any)?.capacite)
+                  : null,
+              logo_url:
+                ((current.planning_souhaite as any)?.logo_url as string) ||
+                null,
               planning: current.planning_souhaite ?? {
                 mode: 'HEBDOMADAIRE',
                 jour_recurrent:
@@ -532,5 +589,23 @@ export class ClubCreationRequestsService {
         official_club_id: officialClub.id,
       };
     });
+
+    try {
+      await this.notificationsService.createClubCreationDecisionNotification({
+        utilisateurId: current.id_demandeur,
+        demandeId: current.id,
+        clubNom: current.nom_club,
+        statut: 'ACCEPTEE',
+        commentaireDecision: dto.commentaire_decision ?? null,
+        reviewedBy: requesterId,
+      });
+    } catch (err) {
+      console.error(
+        "Erreur lors de la creation de la notification d'acceptation:",
+        err,
+      );
+    }
+
+    return result;
   }
 }

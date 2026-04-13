@@ -72,9 +72,51 @@ type PointsEarnedPayload = {
   points: number;
 };
 
+type ClubCreationDecisionPayload = {
+  utilisateurId: string;
+  demandeId: string;
+  clubNom: string;
+  statut: 'ACCEPTEE' | 'REFUSEE';
+  commentaireDecision?: string | null;
+  reviewedBy?: string;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async createClubCreationDecisionNotification(
+    payload: ClubCreationDecisionPayload,
+  ) {
+    const isAccepted = payload.statut === 'ACCEPTEE';
+
+    return this.prisma.notifications.create({
+      data: {
+        id_utilisateur: payload.utilisateurId,
+        type: isAccepted ? 'CLUB_CREATION_ACCEPTED' : 'CLUB_CREATION_REJECTED',
+        titre: isAccepted ? 'Demande club acceptee' : 'Demande club refusee',
+        message: isAccepted
+          ? `Votre demande de creation du club ${payload.clubNom} a ete acceptee.`
+          : `Votre demande de creation du club ${payload.clubNom} a ete refusee.`,
+        data: {
+          demandeId: payload.demandeId,
+          clubNom: payload.clubNom,
+          statut: payload.statut,
+          commentaireDecision: payload.commentaireDecision ?? null,
+          reviewedBy: payload.reviewedBy ?? null,
+        },
+      },
+      select: {
+        id: true,
+        titre: true,
+        message: true,
+        type: true,
+        is_read: true,
+        created_at: true,
+        data: true,
+      },
+    });
+  }
 
   private async createUpcomingEventReminders(utilisateurId: string) {
     const now = new Date();

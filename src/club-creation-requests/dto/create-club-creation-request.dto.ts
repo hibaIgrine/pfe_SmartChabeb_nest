@@ -1,11 +1,14 @@
 import {
+  IsInt,
   IsIn,
   IsNotEmpty,
+  Min,
   IsOptional,
   IsString,
   IsUUID,
   Matches,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreateClubCreationRequestDto {
   @IsString()
@@ -23,6 +26,11 @@ export class CreateClubCreationRequestDto {
   @IsString()
   @IsNotEmpty()
   objectifs: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  capacite: number;
 
   @IsOptional()
   @IsString()

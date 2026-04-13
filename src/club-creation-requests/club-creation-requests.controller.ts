@@ -34,6 +34,7 @@ export class ClubCreationRequestsController {
       [
         { name: 'cv', maxCount: 1 },
         { name: 'attestation', maxCount: 1 },
+        { name: 'logo', maxCount: 1 },
       ],
       {
         storage: diskStorage({
@@ -56,6 +57,7 @@ export class ClubCreationRequestsController {
     files: {
       cv?: Express.Multer.File[];
       attestation?: Express.Multer.File[];
+      logo?: Express.Multer.File[];
     },
   ) {
     return this.clubCreationRequestsService.create(
@@ -69,6 +71,11 @@ export class ClubCreationRequestsController {
   @Get('mine')
   findMine(@Request() req: any) {
     return this.clubCreationRequestsService.findMine(req.user.userId);
+  }
+
+  @Get('categories')
+  findCategories() {
+    return this.clubCreationRequestsService.findCategories();
   }
 
   @Get()
