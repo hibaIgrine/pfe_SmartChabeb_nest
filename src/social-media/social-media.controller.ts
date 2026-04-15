@@ -14,6 +14,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { CreateCommentDto } from '../social-media/dto/create-comment.dto';
 import { CreatePostDto } from '../social-media/dto/create-post.dto';
 import { CreateReactionDto } from './dto/create-reaction.dto';
+import { SharePostDto } from './dto/share-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { SocialMediaService } from './social-media.service';
 
@@ -49,6 +50,15 @@ export class SocialMediaController {
   @Delete('posts/:id')
   deletePost(@Param('id') id: string, @Request() req: any) {
     return this.socialMediaService.deletePost(id, req.user.userId);
+  }
+
+  @Post('posts/:id/share')
+  sharePost(
+    @Param('id') postId: string,
+    @Request() req: any,
+    @Body() body: SharePostDto,
+  ) {
+    return this.socialMediaService.sharePost(postId, req.user.userId, body);
   }
 
   @Post('posts/:id/comments')

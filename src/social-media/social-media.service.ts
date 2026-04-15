@@ -12,6 +12,7 @@ import {
   PublicationMediaItemDto,
   publicationMediaTypes,
 } from '../social-media/dto/create-post.dto';
+import { SharePostDto } from './dto/share-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 
 type NormalizedPublicationMediaItem = {
@@ -402,6 +403,91 @@ export class SocialMediaService {
     return this.prisma.posts.delete({
       where: { id: postId },
     });
+  }
+
+  async sharePost(postId: string, userId: string, dto: SharePostDto) {
+    const sourcePost = await this.prisma.posts.findUnique({
+      where: { id: postId },
+      include: {
+        user: {
+          select: {
+            nom: true,
+            prenom: true,
+          },
+        },
+        hashtags: {
+          select: {
+            hashtag: true,
+          },
+        },
+        mentions: {
+          select: {
+            mentioned_user_id: true,
+          },
+        },
+      },
+    });
+
+    if (!sourcePost) {
+      throw new NotFoundException('Publication introuvable');
+    }
+
+    const sourceMedia = this.parseStoredMedia(sourcePost.media);
+    const sourceHashtags = sourcePost.hashtags.map((item) => item.hashtag);
+    const sourceMentionUserIds = sourcePost.mentions.map(
+      (item) => item.mentioned_user_id,
+    );
+
+    const authorLabel = `${sourcePost.user.nom} ${sourcePost.user.prenom}`.trim();
+    const sourceContent = sourcePost.content?.trim() ?? '';
+    const userMessage = dto.message?.trim() ?? '';
+    const sharePayload = {
+      author: authorLabel,
+      content: sourceContent,
+      location: sourcePost.location ?? null,
+      created_at: sourcePost.created_at,
+      originalPostId: postId,
+    };
+    const encodedPayload = Buffer.from(JSON.stringify(sharePayload)).toString(
+      'base64',
+    );
+    const sharedToken = `[[shared:${encodedPayload}]]`;
+    const sharedContent = userMessage
+      ? `${userMessage}\n\n${sharedToken}`
+      : sharedToken;
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const post = await tx.posts.create({
+        data: {
+          user_id: userId,
+          content: sharedContent,
+          location: sourcePost.location,
+          media: sourceMedia as Prisma.InputJsonValue | undefined,
+        },
+      });
+
+      if (sourceHashtags.length) {
+        await tx.post_hashtags.createMany({
+          data: sourceHashtags.map((hashtag) => ({
+            post_id: post.id,
+            hashtag,
+          })),
+        });
+      }
+
+      if (sourceMentionUserIds.length) {
+        await tx.post_mentions.createMany({
+          data: sourceMentionUserIds.map((mentionedUserId) => ({
+            post_id: post.id,
+            mentioned_user_id: mentionedUserId,
+          })),
+        });
+      }
+
+      return post;
+    });
+
+    return this.getPostOrThrow(created.id);
   }
 
   async createComment(postId: string, userId: string, dto: CreateCommentDto) {
