@@ -51,11 +51,12 @@ export class ClubsService {
     const parsedMinimum = Number(minimumParticipantsRaw);
     const existingMinimum = Number(currentWorkflow.minimum_participants);
 
-    const minimumParticipants = Number.isFinite(parsedMinimum) && parsedMinimum > 1
-      ? Math.floor(parsedMinimum)
-      : Number.isFinite(existingMinimum) && existingMinimum > 1
-        ? Math.floor(existingMinimum)
-        : 5;
+    const minimumParticipants =
+      Number.isFinite(parsedMinimum) && parsedMinimum > 1
+        ? Math.floor(parsedMinimum)
+        : Number.isFinite(existingMinimum) && existingMinimum > 1
+          ? Math.floor(existingMinimum)
+          : 5;
 
     return {
       ...base,
@@ -178,8 +179,10 @@ export class ClubsService {
       const finalLogoUrl = data.logo_url
         ? this.saveBase64Image(data.logo_url)
         : undefined;
-      const finalPlanning =
-        this.withStartWorkflow(data.planning, data.minimum_participants);
+      const finalPlanning = this.withStartWorkflow(
+        data.planning,
+        data.minimum_participants,
+      );
 
       const nouveauClub = await tx.clubs.create({
         data: {
@@ -415,7 +418,9 @@ export class ClubsService {
     }
 
     if (requesterRole !== 'ADMIN' && requesterRole !== 'RESPONSABLE_CENTRE') {
-      throw new BadRequestException('Validation réservée au responsable centre.');
+      throw new BadRequestException(
+        'Validation réservée au responsable centre.',
+      );
     }
 
     if (requesterRole === 'RESPONSABLE_CENTRE') {

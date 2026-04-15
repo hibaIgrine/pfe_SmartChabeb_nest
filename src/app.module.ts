@@ -18,6 +18,8 @@ import { PresencesModule } from './presences/presences.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { EventsModule } from './events/events.module';
 import { ClubCreationRequestsModule } from './club-creation-requests/club-creation-requests.module';
+import { SocialMediaModule } from './social-media/social-media.module';
+import { MessagerieModule } from './messagerie/messagerie.module';
 
 @Module({
   imports: [
@@ -58,6 +60,8 @@ import { ClubCreationRequestsModule } from './club-creation-requests/club-creati
     PresencesModule,
     EventsModule,
     ClubCreationRequestsModule,
+    SocialMediaModule,
+    MessagerieModule,
   ],
   controllers: [AppController],
   providers: [AppService],
