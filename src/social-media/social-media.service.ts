@@ -130,9 +130,9 @@ export class SocialMediaService {
       return undefined;
     }
 
-    const normalized = Array.from(new Set(userIds.map((id) => id.trim()))).filter(
-      Boolean,
-    );
+    const normalized = Array.from(
+      new Set(userIds.map((id) => id.trim())),
+    ).filter(Boolean);
 
     return normalized;
   }
@@ -166,7 +166,13 @@ export class SocialMediaService {
     const hasHashtags = Boolean(hashtags && hashtags.length > 0);
     const hasMentions = Boolean(mentionUserIds && mentionUserIds.length > 0);
 
-    if (!hasContent && !hasMedia && !hasLocation && !hasHashtags && !hasMentions) {
+    if (
+      !hasContent &&
+      !hasMedia &&
+      !hasLocation &&
+      !hasHashtags &&
+      !hasMentions
+    ) {
       throw new BadRequestException(
         'Une publication doit contenir du texte, un média, une localisation, un hashtag ou une mention',
       );
@@ -305,11 +311,14 @@ export class SocialMediaService {
 
     const normalizedMedia = this.normalizeMedia(dto.media);
     const nextContent = dto.content !== undefined ? dto.content : post.content;
-    const nextMedia = dto.media !== undefined
-      ? normalizedMedia
-      : this.parseStoredMedia(post.media);
+    const nextMedia =
+      dto.media !== undefined
+        ? normalizedMedia
+        : this.parseStoredMedia(post.media);
     const nextLocation =
-      dto.location !== undefined ? dto.location?.trim() || '' : post.location || '';
+      dto.location !== undefined
+        ? dto.location?.trim() || ''
+        : post.location || '';
 
     const normalizedHashtags = this.normalizeHashtags(dto.hashtags);
     const normalizedMentionUserIds = this.normalizeMentionUserIds(
@@ -439,5 +448,79 @@ export class SocialMediaService {
         },
       },
     });
+  }
+
+  async addReaction(postId: string, userId: string, reactionType: string) {
+    await this.getPostOrThrow(postId);
+
+    await this.prisma.post_reactions.upsert({
+      where: {
+        post_id_user_id: {
+          post_id: postId,
+          user_id: userId,
+        },
+      },
+      update: {
+        reaction_type: reactionType,
+      },
+      create: {
+        post_id: postId,
+        user_id: userId,
+        reaction_type: reactionType,
+      },
+    });
+
+    return this.getReactions(postId, userId);
+  }
+
+  async removeReaction(postId: string, userId: string) {
+    await this.getPostOrThrow(postId);
+
+    await this.prisma.post_reactions.deleteMany({
+      where: {
+        post_id: postId,
+        user_id: userId,
+      },
+    });
+
+    return this.getReactions(postId, userId);
+  }
+
+  async getReactions(postId: string, currentUserId?: string) {
+    const reactions = await this.prisma.post_reactions.findMany({
+      where: { post_id: postId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            photo_profil_url: true,
+          },
+        },
+      },
+    });
+
+    const aggregated = reactions.reduce(
+      (acc, reaction) => {
+        if (!acc[reaction.reaction_type]) {
+          acc[reaction.reaction_type] = [];
+        }
+        acc[reaction.reaction_type].push(reaction.user);
+        return acc;
+      },
+      {} as Record<string, any[]>,
+    );
+
+    const userReaction = currentUserId
+      ? (reactions.find((reaction) => reaction.user_id === currentUserId)
+          ?.reaction_type ?? null)
+      : null;
+
+    return {
+      aggregated,
+      total: reactions.length,
+      userReaction,
+    };
   }
 }

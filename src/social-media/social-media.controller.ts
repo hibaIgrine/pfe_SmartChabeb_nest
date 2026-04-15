@@ -13,6 +13,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { CreateCommentDto } from '../social-media/dto/create-comment.dto';
 import { CreatePostDto } from '../social-media/dto/create-post.dto';
+import { CreateReactionDto } from './dto/create-reaction.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { SocialMediaService } from './social-media.service';
 
@@ -62,5 +63,28 @@ export class SocialMediaController {
   @Get('posts/:id/comments')
   findComments(@Param('id') postId: string) {
     return this.socialMediaService.findCommentsByPost(postId);
+  }
+
+  @Post('posts/:id/reactions')
+  addReaction(
+    @Param('id') postId: string,
+    @Request() req: any,
+    @Body() body: CreateReactionDto,
+  ) {
+    return this.socialMediaService.addReaction(
+      postId,
+      req.user.userId,
+      body.reaction_type,
+    );
+  }
+
+  @Delete('posts/:id/reactions')
+  removeReaction(@Param('id') postId: string, @Request() req: any) {
+    return this.socialMediaService.removeReaction(postId, req.user.userId);
+  }
+
+  @Get('posts/:id/reactions')
+  getReactions(@Param('id') postId: string, @Request() req: any) {
+    return this.socialMediaService.getReactions(postId, req.user.userId);
   }
 }

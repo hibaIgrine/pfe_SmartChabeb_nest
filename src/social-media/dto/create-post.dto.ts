@@ -10,11 +10,7 @@ import {
   MinLength,
 } from 'class-validator';
 
-export const publicationMediaTypes = [
-  'image',
-  'video',
-  'document',
-] as const;
+export const publicationMediaTypes = ['image', 'video', 'document'] as const;
 
 export type PublicationMediaType = (typeof publicationMediaTypes)[number];
 
