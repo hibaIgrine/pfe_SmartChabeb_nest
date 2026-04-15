@@ -22,6 +22,8 @@ type NormalizedPublicationMediaItem = {
   name?: string;
 };
 
+const COMMENT_REPLY_TOKEN_REGEX = /\[\[reply:(.*?)\]\]/;
+
 @Injectable()
 export class SocialMediaService {
   constructor(
@@ -128,6 +130,16 @@ export class SocialMediaService {
     );
 
     return normalized;
+  }
+
+  private parseReplyToCommentId(content: string): string | null {
+    const match = COMMENT_REPLY_TOKEN_REGEX.exec(content);
+    if (!match || !match[1]) {
+      return null;
+    }
+
+    const value = String(match[1]).trim();
+    return value.length > 0 ? value : null;
   }
 
   private normalizeMentionUserIds(userIds?: string[]): string[] | undefined {
@@ -515,14 +527,14 @@ export class SocialMediaService {
 
     const post = await this.prisma.posts.findUnique({
       where: { id: postId },
-      select: { id: true },
+      select: { id: true, user_id: true },
     });
 
     if (!post) {
       throw new NotFoundException('Publication introuvable');
     }
 
-    return this.prisma.comments.create({
+    const createdComment = await this.prisma.comments.create({
       data: {
         post_id: postId,
         user_id: userId,
@@ -539,6 +551,49 @@ export class SocialMediaService {
         },
       },
     });
+
+    const commenterNomComplet = `${createdComment.user.nom} ${createdComment.user.prenom}`.trim();
+
+    const replyToCommentId = this.parseReplyToCommentId(content);
+    let repliedUserId: string | null = null;
+
+    if (replyToCommentId) {
+      const parentComment = await this.prisma.comments.findUnique({
+        where: { id: replyToCommentId },
+        select: {
+          id: true,
+          post_id: true,
+          user_id: true,
+        },
+      });
+
+      if (parentComment && parentComment.post_id === postId) {
+        repliedUserId = parentComment.user_id;
+
+        if (repliedUserId !== userId) {
+          await this.notificationsService.createPostCommentReplyNotification({
+            utilisateurId: repliedUserId,
+            postId,
+            commentId: createdComment.id,
+            parentCommentId: parentComment.id,
+            replierId: userId,
+            replierNomComplet: commenterNomComplet || 'Quelqu un',
+          });
+        }
+      }
+    }
+
+    if (post.user_id !== userId && post.user_id !== repliedUserId) {
+      await this.notificationsService.createPostCommentNotification({
+        utilisateurId: post.user_id,
+        postId,
+        commentId: createdComment.id,
+        commenterId: userId,
+        commenterNomComplet: commenterNomComplet || 'Quelqu un',
+      });
+    }
+
+    return createdComment;
   }
 
   async updateComment(

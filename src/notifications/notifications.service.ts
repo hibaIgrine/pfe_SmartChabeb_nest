@@ -90,9 +90,81 @@ type PostReactionNotificationPayload = {
   reactionLabel: string;
 };
 
+type PostCommentNotificationPayload = {
+  utilisateurId: string;
+  postId: string;
+  commentId: string;
+  commenterId: string;
+  commenterNomComplet: string;
+};
+
+type PostCommentReplyNotificationPayload = {
+  utilisateurId: string;
+  postId: string;
+  commentId: string;
+  parentCommentId: string;
+  replierId: string;
+  replierNomComplet: string;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async createPostCommentNotification(payload: PostCommentNotificationPayload) {
+    return this.prisma.notifications.create({
+      data: {
+        id_utilisateur: payload.utilisateurId,
+        type: 'POST_COMMENT',
+        titre: 'Nouveau commentaire',
+        message: `${payload.commenterNomComplet} a commente votre publication.`,
+        data: {
+          postId: payload.postId,
+          commentId: payload.commentId,
+          commenterId: payload.commenterId,
+          commenterNomComplet: payload.commenterNomComplet,
+        },
+      },
+      select: {
+        id: true,
+        titre: true,
+        message: true,
+        type: true,
+        is_read: true,
+        created_at: true,
+        data: true,
+      },
+    });
+  }
+
+  async createPostCommentReplyNotification(
+    payload: PostCommentReplyNotificationPayload,
+  ) {
+    return this.prisma.notifications.create({
+      data: {
+        id_utilisateur: payload.utilisateurId,
+        type: 'POST_COMMENT_REPLY',
+        titre: 'Nouvelle reponse',
+        message: `${payload.replierNomComplet} a repondu a votre commentaire.`,
+        data: {
+          postId: payload.postId,
+          commentId: payload.commentId,
+          parentCommentId: payload.parentCommentId,
+          replierId: payload.replierId,
+          replierNomComplet: payload.replierNomComplet,
+        },
+      },
+      select: {
+        id: true,
+        titre: true,
+        message: true,
+        type: true,
+        is_read: true,
+        created_at: true,
+        data: true,
+      },
+    });
+  }
 
   async createPostReactionNotification(payload: PostReactionNotificationPayload) {
     return this.prisma.notifications.create({
