@@ -126,6 +126,17 @@ export class ClubsController {
     return this.clubsService.activate(id);
   }
 
+  @Patch(':id/start')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE')
+  validateStart(@Param('id') id: string, @Request() req: any) {
+    return this.clubsService.validateClubStart(
+      id,
+      req.user.userId,
+      req.user.role,
+    );
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: any) {
     return this.clubsService.update(id, body);

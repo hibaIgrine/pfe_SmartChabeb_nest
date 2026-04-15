@@ -16,6 +16,97 @@ export class ClubsService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  private normalizePlanningObject(planning: any): Record<string, any> {
+    if (!planning) return {};
+
+    if (typeof planning === 'string') {
+      try {
+        const parsed = JSON.parse(planning);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed;
+        }
+        return { texte: planning };
+      } catch {
+        return { texte: planning };
+      }
+    }
+
+    if (typeof planning === 'object' && !Array.isArray(planning)) {
+      return planning;
+    }
+
+    return {};
+  }
+
+  private withStartWorkflow(
+    planning: any,
+    minimumParticipantsRaw?: any,
+  ): Record<string, any> {
+    const base = this.normalizePlanningObject(planning);
+    const currentWorkflow =
+      base.start_workflow && typeof base.start_workflow === 'object'
+        ? base.start_workflow
+        : {};
+
+    const parsedMinimum = Number(minimumParticipantsRaw);
+    const existingMinimum = Number(currentWorkflow.minimum_participants);
+
+    const minimumParticipants = Number.isFinite(parsedMinimum) && parsedMinimum > 1
+      ? Math.floor(parsedMinimum)
+      : Number.isFinite(existingMinimum) && existingMinimum > 1
+        ? Math.floor(existingMinimum)
+        : 5;
+
+    return {
+      ...base,
+      start_workflow: {
+        minimum_participants: minimumParticipants,
+        centre_validation_required: true,
+        centre_validated: Boolean(currentWorkflow.centre_validated),
+        is_started: Boolean(currentWorkflow.is_started),
+        validated_by: currentWorkflow.validated_by ?? null,
+        validated_at: currentWorkflow.validated_at ?? null,
+      },
+    };
+  }
+
+  private extractMinimumParticipants(club: { planning: any }): number {
+    const planning = this.normalizePlanningObject(club.planning);
+    const raw = Number((planning.start_workflow as any)?.minimum_participants);
+    if (Number.isFinite(raw) && raw > 1) {
+      return Math.floor(raw);
+    }
+    return 5;
+  }
+
+  private buildStartStatus(club: {
+    planning: any;
+    accepted_participants?: number;
+  }) {
+    const planning = this.normalizePlanningObject(club.planning);
+    const workflow =
+      planning.start_workflow && typeof planning.start_workflow === 'object'
+        ? planning.start_workflow
+        : {};
+
+    const minimum = this.extractMinimumParticipants({ planning });
+    const accepted = Number(club.accepted_participants ?? 0);
+    const validated = Boolean(workflow.centre_validated);
+    const started = Boolean(workflow.is_started);
+
+    return {
+      minimum_participants: minimum,
+      accepted_participants: accepted,
+      minimum_reached: accepted >= minimum,
+      centre_validation_required: true,
+      centre_validated: validated,
+      is_started: started,
+      ready_for_validation: accepted >= minimum && !validated,
+      validated_by: workflow.validated_by ?? null,
+      validated_at: workflow.validated_at ?? null,
+    };
+  }
+
   // ==========================================
   // UTILS : Gestion des Images
   // ==========================================
@@ -88,9 +179,7 @@ export class ClubsService {
         ? this.saveBase64Image(data.logo_url)
         : undefined;
       const finalPlanning =
-        typeof data.planning === 'string'
-          ? { texte: data.planning }
-          : data.planning;
+        this.withStartWorkflow(data.planning, data.minimum_participants);
 
       const nouveauClub = await tx.clubs.create({
         data: {
@@ -141,7 +230,7 @@ export class ClubsService {
   }
 
   async findAll(id_centre?: string) {
-    return await this.prisma.clubs.findMany({
+    const clubs = await this.prisma.clubs.findMany({
       where: id_centre ? { id_centre } : {}, // 💡 id_salle -> id_centre
       include: {
         responsable: { select: { nom: true, prenom: true } }, // 💡 coach -> responsable
@@ -160,10 +249,24 @@ export class ClubsService {
           },
           orderBy: { date_adhesion: 'desc' },
         },
-        _count: { select: { inscriptions: true } },
+        _count: {
+          select: {
+            inscriptions: {
+              where: { statut: 'ACCEPTE' },
+            },
+          },
+        },
       },
       orderBy: { nom: 'asc' },
     });
+
+    return clubs.map((club) => ({
+      ...club,
+      start_status: this.buildStartStatus({
+        planning: club.planning,
+        accepted_participants: club._count.inscriptions,
+      }),
+    }));
   }
 
   async findOne(id: string) {
@@ -245,10 +348,18 @@ export class ClubsService {
       }))
       .filter((item) => item.utilisateur !== null);
 
+    const acceptedParticipants = inscriptions.filter(
+      (item) => item.statut === 'ACCEPTE',
+    ).length;
+
     return {
       ...club,
       staff,
       inscriptions,
+      start_status: this.buildStartStatus({
+        planning: club.planning,
+        accepted_participants: acceptedParticipants,
+      }),
     };
   }
 
@@ -258,10 +369,15 @@ export class ClubsService {
       finalLogoUrl = this.saveBase64Image(finalLogoUrl);
     }
 
-    let finalPlanning = data.planning;
-    if (finalPlanning && typeof finalPlanning === 'string') {
-      finalPlanning = { texte: finalPlanning };
-    }
+    const current = await this.prisma.clubs.findUnique({
+      where: { id },
+      select: { planning: true },
+    });
+
+    let finalPlanning = this.withStartWorkflow(
+      data.planning !== undefined ? data.planning : current?.planning,
+      data.minimum_participants,
+    );
 
     return await this.prisma.clubs.update({
       where: { id },
@@ -277,6 +393,95 @@ export class ClubsService {
         locale_fixe: data.locale_fixe,
       },
     });
+  }
+
+  async validateClubStart(
+    clubId: string,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    const club = await this.prisma.clubs.findUnique({
+      where: { id: clubId },
+      select: {
+        id: true,
+        nom: true,
+        id_centre: true,
+        planning: true,
+      },
+    });
+
+    if (!club) {
+      throw new NotFoundException('Club introuvable');
+    }
+
+    if (requesterRole !== 'ADMIN' && requesterRole !== 'RESPONSABLE_CENTRE') {
+      throw new BadRequestException('Validation réservée au responsable centre.');
+    }
+
+    if (requesterRole === 'RESPONSABLE_CENTRE') {
+      const requester = await this.prisma.utilisateurs.findUnique({
+        where: { id: requesterId },
+        select: { id_centre: true },
+      });
+
+      if (!requester?.id_centre || requester.id_centre !== club.id_centre) {
+        throw new BadRequestException(
+          'Vous ne pouvez valider que les clubs de votre centre.',
+        );
+      }
+    }
+
+    const acceptedParticipants = await this.prisma.inscriptions_clubs.count({
+      where: {
+        id_club: clubId,
+        statut: 'ACCEPTE',
+      },
+    });
+
+    const minimumParticipants = this.extractMinimumParticipants(club);
+
+    if (acceptedParticipants < minimumParticipants) {
+      throw new BadRequestException(
+        `Le club doit atteindre au moins ${minimumParticipants} participants acceptés avant validation finale.`,
+      );
+    }
+
+    const planning = this.withStartWorkflow(club.planning, minimumParticipants);
+    const workflow =
+      planning.start_workflow && typeof planning.start_workflow === 'object'
+        ? planning.start_workflow
+        : {};
+
+    planning.start_workflow = {
+      ...workflow,
+      minimum_participants: minimumParticipants,
+      centre_validation_required: true,
+      centre_validated: true,
+      is_started: true,
+      validated_by: requesterId,
+      validated_at: new Date().toISOString(),
+    };
+
+    const updated = await this.prisma.clubs.update({
+      where: { id: clubId },
+      data: {
+        planning,
+      },
+      select: {
+        id: true,
+        nom: true,
+        planning: true,
+      },
+    });
+
+    return {
+      ...updated,
+      start_status: this.buildStartStatus({
+        planning: updated.planning,
+        accepted_participants: acceptedParticipants,
+      }),
+      message: 'Validation finale effectuée. Le club peut démarrer.',
+    };
   }
 
   async addStaffToClub(
