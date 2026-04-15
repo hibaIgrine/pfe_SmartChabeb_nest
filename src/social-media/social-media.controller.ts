@@ -65,6 +65,34 @@ export class SocialMediaController {
     return this.socialMediaService.findCommentsByPost(postId);
   }
 
+  @Patch('posts/:postId/comments/:commentId')
+  updateComment(
+    @Param('postId') postId: string,
+    @Param('commentId') commentId: string,
+    @Request() req: any,
+    @Body() body: CreateCommentDto,
+  ) {
+    return this.socialMediaService.updateComment(
+      postId,
+      commentId,
+      req.user.userId,
+      body,
+    );
+  }
+
+  @Delete('posts/:postId/comments/:commentId')
+  deleteComment(
+    @Param('postId') postId: string,
+    @Param('commentId') commentId: string,
+    @Request() req: any,
+  ) {
+    return this.socialMediaService.deleteComment(
+      postId,
+      commentId,
+      req.user.userId,
+    );
+  }
+
   @Post('posts/:id/reactions')
   addReaction(
     @Param('id') postId: string,

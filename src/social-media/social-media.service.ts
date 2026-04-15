@@ -405,6 +405,11 @@ export class SocialMediaService {
   }
 
   async createComment(postId: string, userId: string, dto: CreateCommentDto) {
+    const content = dto.content.trim();
+    if (!content) {
+      throw new BadRequestException('Le commentaire ne peut pas etre vide');
+    }
+
     const post = await this.prisma.posts.findUnique({
       where: { id: postId },
       select: { id: true },
@@ -418,7 +423,7 @@ export class SocialMediaService {
       data: {
         post_id: postId,
         user_id: userId,
-        content: dto.content,
+        content,
       },
       include: {
         user: {
@@ -431,6 +436,81 @@ export class SocialMediaService {
         },
       },
     });
+  }
+
+  async updateComment(
+    postId: string,
+    commentId: string,
+    userId: string,
+    dto: CreateCommentDto,
+  ) {
+    const content = dto.content.trim();
+    if (!content) {
+      throw new BadRequestException('Le commentaire ne peut pas etre vide');
+    }
+
+    const comment = await this.prisma.comments.findUnique({
+      where: { id: commentId },
+      select: {
+        id: true,
+        post_id: true,
+        user_id: true,
+      },
+    });
+
+    if (!comment || comment.post_id !== postId) {
+      throw new NotFoundException('Commentaire introuvable');
+    }
+
+    if (comment.user_id !== userId) {
+      throw new ForbiddenException(
+        'Vous ne pouvez pas modifier ce commentaire',
+      );
+    }
+
+    return this.prisma.comments.update({
+      where: { id: commentId },
+      data: {
+        content,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            photo_profil_url: true,
+          },
+        },
+      },
+    });
+  }
+
+  async deleteComment(postId: string, commentId: string, userId: string) {
+    const comment = await this.prisma.comments.findUnique({
+      where: { id: commentId },
+      select: {
+        id: true,
+        post_id: true,
+        user_id: true,
+      },
+    });
+
+    if (!comment || comment.post_id !== postId) {
+      throw new NotFoundException('Commentaire introuvable');
+    }
+
+    if (comment.user_id !== userId) {
+      throw new ForbiddenException(
+        'Vous ne pouvez pas supprimer ce commentaire',
+      );
+    }
+
+    await this.prisma.comments.delete({
+      where: { id: commentId },
+    });
+
+    return { success: true };
   }
 
   async findCommentsByPost(postId: string) {
