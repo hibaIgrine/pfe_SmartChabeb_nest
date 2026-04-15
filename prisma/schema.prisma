@@ -55,6 +55,7 @@ model utilisateurs {
   notifications       notifications[]
   posts               posts[]
   comments            comments[]
+  post_mentions_received post_mentions[]   @relation("post_mentioned_user")
   messages_sent       messages[]            @relation("message_sender")
   conversations_created conversations[]      @relation("conversation_creator")
   conversation_participations conversation_participants[]
@@ -361,14 +362,45 @@ model posts {
   id           String   @id @default(uuid()) @db.Uuid
   user_id      String   @db.Uuid
   content      String   @db.Text
+  location     String?  @db.VarChar(255)
   media        Json?
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
 
   user         utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
   comments     comments[]
+  hashtags     post_hashtags[]
+  mentions     post_mentions[]
 
   @@index([user_id, created_at])
+  @@index([created_at])
+}
+
+model post_hashtags {
+  id         String   @id @default(uuid()) @db.Uuid
+  post_id    String   @db.Uuid
+  hashtag    String   @db.VarChar(100)
+  created_at DateTime @default(now())
+
+  post       posts    @relation(fields: [post_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, hashtag])
+  @@index([hashtag])
+  @@index([post_id])
+}
+
+model post_mentions {
+  id                String       @id @default(uuid()) @db.Uuid
+  post_id           String       @db.Uuid
+  mentioned_user_id String       @db.Uuid
+  created_at        DateTime     @default(now())
+
+  post              posts        @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  mentioned_user    utilisateurs @relation("post_mentioned_user", fields: [mentioned_user_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, mentioned_user_id])
+  @@index([mentioned_user_id])
+  @@index([post_id])
 }
 
 model comments {
