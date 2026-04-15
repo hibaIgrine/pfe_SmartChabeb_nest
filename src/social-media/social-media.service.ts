@@ -12,6 +12,7 @@ import {
   PublicationMediaItemDto,
   publicationMediaTypes,
 } from '../social-media/dto/create-post.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 import { SharePostDto } from './dto/share-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 
@@ -23,7 +24,10 @@ type NormalizedPublicationMediaItem = {
 
 @Injectable()
 export class SocialMediaService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private readonly postInclude = {
     user: {
@@ -244,7 +248,7 @@ export class SocialMediaService {
     return this.getPostOrThrow(created.id);
   }
 
-  async findPosts(limit?: string, offset?: string) {
+  async findPosts(limit?: string, offset?: string, currentUserId?: string) {
     const parsedLimit = Number.parseInt(limit ?? '20', 10);
     const parsedOffset = Number.parseInt(offset ?? '0', 10);
 
@@ -255,15 +259,24 @@ export class SocialMediaService {
       ? 0
       : Math.max(parsedOffset, 0);
 
-    return this.prisma.posts.findMany({
+    const posts = await this.prisma.posts.findMany({
       orderBy: { created_at: 'desc' },
       take: safeLimit,
       skip: safeOffset,
       include: this.postInclude,
     });
+
+    const postsWithReactions = await Promise.all(
+      posts.map(async (post) => ({
+        ...post,
+        reactions: await this.getReactions(post.id, currentUserId),
+      })),
+    );
+
+    return postsWithReactions;
   }
 
-  async findPostById(postId: string) {
+  async findPostById(postId: string, currentUserId?: string) {
     const post = await this.prisma.posts.findUnique({
       where: { id: postId },
       include: {
@@ -288,7 +301,10 @@ export class SocialMediaService {
       throw new NotFoundException('Publication introuvable');
     }
 
-    return post;
+    return {
+      ...post,
+      reactions: await this.getReactions(post.id, currentUserId),
+    };
   }
 
   async updatePost(postId: string, userId: string, dto: UpdatePostDto) {
@@ -438,7 +454,8 @@ export class SocialMediaService {
       (item) => item.mentioned_user_id,
     );
 
-    const authorLabel = `${sourcePost.user.nom} ${sourcePost.user.prenom}`.trim();
+    const authorLabel =
+      `${sourcePost.user.nom} ${sourcePost.user.prenom}`.trim();
     const sourceContent = sourcePost.content?.trim() ?? '';
     const userMessage = dto.message?.trim() ?? '';
     const sharePayload = {
@@ -617,7 +634,36 @@ export class SocialMediaService {
   }
 
   async addReaction(postId: string, userId: string, reactionType: string) {
-    await this.getPostOrThrow(postId);
+    const post = await this.prisma.posts.findUnique({
+      where: { id: postId },
+      select: {
+        id: true,
+        user_id: true,
+        user: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+          },
+        },
+      },
+    });
+
+    if (!post) {
+      throw new NotFoundException('Publication introuvable');
+    }
+
+    const previousReaction = await this.prisma.post_reactions.findUnique({
+      where: {
+        post_id_user_id: {
+          post_id: postId,
+          user_id: userId,
+        },
+      },
+      select: {
+        reaction_type: true,
+      },
+    });
 
     await this.prisma.post_reactions.upsert({
       where: {
@@ -635,6 +681,40 @@ export class SocialMediaService {
         reaction_type: reactionType,
       },
     });
+
+    const isNewReactionEvent = previousReaction?.reaction_type !== reactionType;
+    const isOwnPost = post.user_id === userId;
+
+    if (isNewReactionEvent && !isOwnPost) {
+      const reactor = await this.prisma.utilisateurs.findUnique({
+        where: { id: userId },
+        select: {
+          nom: true,
+          prenom: true,
+        },
+      });
+
+      const reactionLabelMap: Record<string, string> = {
+        like: 'Like',
+        love: 'J adore',
+        wow: 'Wow',
+        bravo: 'Bravo',
+        instructif: 'Instructif',
+        soutien: 'Soutien',
+        haha: 'Haha',
+      };
+
+      const reactorNomComplet = `${reactor?.nom ?? ''} ${reactor?.prenom ?? ''}`.trim();
+
+      await this.notificationsService.createPostReactionNotification({
+        utilisateurId: post.user_id,
+        postId,
+        reactorId: userId,
+        reactorNomComplet: reactorNomComplet || 'Quelqu un',
+        reactionType,
+        reactionLabel: reactionLabelMap[reactionType] ?? reactionType,
+      });
+    }
 
     return this.getReactions(postId, userId);
   }

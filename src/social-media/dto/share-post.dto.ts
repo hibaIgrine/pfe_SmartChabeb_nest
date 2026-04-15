@@ -3,7 +3,8 @@ import { IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class SharePostDto {
   @ApiPropertyOptional({
-    description: 'Message personnel affiché au-dessus de la publication partagée',
+    description:
+      'Message personnel affiché au-dessus de la publication partagée',
     maxLength: 1000,
   })
   @IsOptional()

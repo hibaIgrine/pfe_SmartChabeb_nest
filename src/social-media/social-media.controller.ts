@@ -29,13 +29,17 @@ export class SocialMediaController {
   }
 
   @Get('posts')
-  findPosts(@Query('limit') limit?: string, @Query('offset') offset?: string) {
-    return this.socialMediaService.findPosts(limit, offset);
+  findPosts(
+    @Request() req: any,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.socialMediaService.findPosts(limit, offset, req.user.userId);
   }
 
   @Get('posts/:id')
-  findPostById(@Param('id') id: string) {
-    return this.socialMediaService.findPostById(id);
+  findPostById(@Param('id') id: string, @Request() req: any) {
+    return this.socialMediaService.findPostById(id, req.user.userId);
   }
 
   @Patch('posts/:id')

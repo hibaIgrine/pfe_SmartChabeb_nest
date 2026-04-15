@@ -81,9 +81,45 @@ type ClubCreationDecisionPayload = {
   reviewedBy?: string;
 };
 
+type PostReactionNotificationPayload = {
+  utilisateurId: string;
+  postId: string;
+  reactorId: string;
+  reactorNomComplet: string;
+  reactionType: string;
+  reactionLabel: string;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async createPostReactionNotification(payload: PostReactionNotificationPayload) {
+    return this.prisma.notifications.create({
+      data: {
+        id_utilisateur: payload.utilisateurId,
+        type: 'POST_REACTION',
+        titre: 'Nouvelle reaction',
+        message: `${payload.reactorNomComplet} a reagi (${payload.reactionLabel}) a votre publication.`,
+        data: {
+          postId: payload.postId,
+          reactorId: payload.reactorId,
+          reactorNomComplet: payload.reactorNomComplet,
+          reactionType: payload.reactionType,
+          reactionLabel: payload.reactionLabel,
+        },
+      },
+      select: {
+        id: true,
+        titre: true,
+        message: true,
+        type: true,
+        is_read: true,
+        created_at: true,
+        data: true,
+      },
+    });
+  }
 
   async createClubCreationDecisionNotification(
     payload: ClubCreationDecisionPayload,
