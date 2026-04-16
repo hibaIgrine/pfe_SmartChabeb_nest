@@ -7,12 +7,14 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { MailerService } from '@nestjs-modules/mailer';
+import { EtablissementsService } from 'src/etablissements/etablissements.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private mailerService: MailerService,
+    private etablissementsService: EtablissementsService,
   ) {}
 
   private resolveBadge(points: number) {
@@ -265,6 +267,21 @@ export class UsersService {
       );
     } else {
       delete updateUserDto.mot_de_passe;
+    }
+
+    // Gestion de etablissement_etude: créer ou trouver
+    if (updateUserDto.etablissement_etude !== undefined) {
+      if (
+        updateUserDto.etablissement_etude &&
+        updateUserDto.etablissement_etude.trim() !== ''
+      ) {
+        const etab = await this.etablissementsService.findOrCreate(
+          updateUserDto.etablissement_etude,
+        );
+        updateUserDto.etablissement_etude = etab?.nom || null;
+      } else {
+        updateUserDto.etablissement_etude = null;
+      }
     }
 
     const updatedUser = await this.prisma.utilisateurs.update({

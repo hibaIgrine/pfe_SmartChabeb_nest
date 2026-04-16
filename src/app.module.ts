@@ -21,6 +21,7 @@ import { ClubCreationRequestsModule } from './club-creation-requests/club-creati
 import { SocialMediaModule } from './social-media/social-media.module';
 import { MessagerieModule } from './messagerie/messagerie.module';
 import { StoriesModule } from './stories/stories.module';
+import { EtablissementsModule } from './etablissements/etablissements.module';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { StoriesModule } from './stories/stories.module';
     SocialMediaModule,
     MessagerieModule,
     StoriesModule,
+    EtablissementsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
