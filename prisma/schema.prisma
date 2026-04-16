@@ -63,13 +63,15 @@ model utilisateurs {
   presences_club      presences_clubs[]      @relation("presence_membre")
   presences_marquees  presences_clubs[]      @relation("presence_responsable")
   demandes_creation_clubs demandes_creation_clubs[]
+  stories             stories[]
+  story_views         story_views[]
 }
 
 // ==========================================
 // 2. MODULE INSTITUTIONS (CENTRES)
 // ==========================================
 
-model centres { // 💡 Le modèle s'appelle maintenant centres
+model centres {
   id              String         @id @default(uuid()) @db.Uuid
   nom             String         @unique @db.VarChar(100)
   gouvernorat     String         @db.VarChar(100)
@@ -83,8 +85,8 @@ model centres { // 💡 Le modèle s'appelle maintenant centres
   // Relations
   utilisateurs    utilisateurs[]
   clubs           clubs[]
-  locaux          locaux[]       // Les espaces physiques (Théâtre, Terrain)
-  inventaire      equipements[]  // Le matériel du centre
+  locaux          locaux[]
+  inventaire      equipements[]
   demandes_creation_clubs demandes_creation_clubs[]
 }
 
@@ -482,4 +484,37 @@ model messages {
 
   @@index([conversation_id, created_at])
   @@index([sender_id])
+}
+
+// ==========================================
+// 7. MODULE STORIES (Publications temporaires)
+// ==========================================
+
+model stories {
+  id           String   @id @default(uuid()) @db.Uuid
+  user_id      String   @db.Uuid
+  content      String?  @db.Text
+  media        Json?    // [{type: 'image'|'video', url: string}]
+  created_at   DateTime @default(now())
+  expires_at   DateTime // 24h après created_at
+
+  user         utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  views        story_views[]
+
+  @@index([user_id, created_at])
+  @@index([expires_at])
+}
+
+model story_views {
+  id           String   @id @default(uuid()) @db.Uuid
+  story_id     String   @db.Uuid
+  viewer_id    String   @db.Uuid
+  viewed_at    DateTime @default(now())
+
+  story        stories      @relation(fields: [story_id], references: [id], onDelete: Cascade)
+  viewer       utilisateurs @relation(fields: [viewer_id], references: [id], onDelete: Cascade)
+
+  @@unique([story_id, viewer_id])
+  @@index([story_id])
+  @@index([viewer_id])
 }
