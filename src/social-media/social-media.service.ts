@@ -583,6 +583,10 @@ export class SocialMediaService {
       throw new BadRequestException('Le commentaire ne peut pas etre vide');
     }
 
+    const normalizedMentionUserIds =
+      this.normalizeMentionUserIds(dto.mentioned_user_ids) ?? [];
+    await this.ensureMentionUsersExist(normalizedMentionUserIds);
+
     const post = await this.prisma.posts.findUnique({
       where: { id: postId },
       select: { id: true, user_id: true },
@@ -650,6 +654,29 @@ export class SocialMediaService {
         commenterId: userId,
         commenterNomComplet: commenterNomComplet || 'Quelqu un',
       });
+    }
+
+    if (normalizedMentionUserIds.length) {
+      const mentionTargets = normalizedMentionUserIds.filter(
+        (mentionedUserId) =>
+          mentionedUserId !== userId &&
+          mentionedUserId !== post.user_id &&
+          mentionedUserId !== repliedUserId,
+      );
+
+      if (mentionTargets.length) {
+        await Promise.all(
+          mentionTargets.map((utilisateurId) =>
+            this.notificationsService.createPostCommentMentionNotification({
+              utilisateurId,
+              postId,
+              commentId: createdComment.id,
+              commenterId: userId,
+              commenterNomComplet: commenterNomComplet || 'Quelqu un',
+            }),
+          ),
+        );
+      }
     }
 
     return createdComment;

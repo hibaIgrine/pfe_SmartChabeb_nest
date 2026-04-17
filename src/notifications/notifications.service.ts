@@ -114,6 +114,14 @@ type PostMentionNotificationPayload = {
   auteurNomComplet: string;
 };
 
+type PostCommentMentionNotificationPayload = {
+  utilisateurId: string;
+  postId: string;
+  commentId: string;
+  commenterId: string;
+  commenterNomComplet: string;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -213,6 +221,34 @@ export class NotificationsService {
           postId: payload.postId,
           auteurId: payload.auteurId,
           auteurNomComplet: payload.auteurNomComplet,
+        },
+      },
+      select: {
+        id: true,
+        titre: true,
+        message: true,
+        type: true,
+        is_read: true,
+        created_at: true,
+        data: true,
+      },
+    });
+  }
+
+  async createPostCommentMentionNotification(
+    payload: PostCommentMentionNotificationPayload,
+  ) {
+    return this.prisma.notifications.create({
+      data: {
+        id_utilisateur: payload.utilisateurId,
+        type: 'POST_COMMENT_MENTION',
+        titre: 'Vous avez ete mentionne',
+        message: `${payload.commenterNomComplet} vous a mentionne dans un commentaire.`,
+        data: {
+          postId: payload.postId,
+          commentId: payload.commentId,
+          commenterId: payload.commenterId,
+          commenterNomComplet: payload.commenterNomComplet,
         },
       },
       select: {
