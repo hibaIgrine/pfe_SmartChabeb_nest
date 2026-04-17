@@ -170,6 +170,43 @@ export class SocialMediaService {
     }
   }
 
+  private async notifyPostMentions(
+    authorId: string,
+    postId: string,
+    mentionUserIds: string[],
+  ) {
+    if (!mentionUserIds.length) {
+      return;
+    }
+
+    const targetUserIds = mentionUserIds.filter((id) => id !== authorId);
+    if (!targetUserIds.length) {
+      return;
+    }
+
+    const author = await this.prisma.utilisateurs.findUnique({
+      where: { id: authorId },
+      select: {
+        nom: true,
+        prenom: true,
+      },
+    });
+
+    const authorName =
+      `${author?.nom ?? ''} ${author?.prenom ?? ''}`.trim() || 'Quelqu un';
+
+    await Promise.all(
+      targetUserIds.map((utilisateurId) =>
+        this.notificationsService.createPostMentionNotification({
+          utilisateurId,
+          postId,
+          auteurId: authorId,
+          auteurNomComplet: authorName,
+        }),
+      ),
+    );
+  }
+
   private ensurePublicationContent(
     content?: string,
     media?: PublicationMediaItemDto[],
@@ -256,6 +293,14 @@ export class SocialMediaService {
 
       return post;
     });
+
+    if (normalizedMentionUserIds.length) {
+      await this.notifyPostMentions(
+        userId,
+        created.id,
+        normalizedMentionUserIds,
+      );
+    }
 
     return this.getPostOrThrow(created.id);
   }
@@ -409,6 +454,19 @@ export class SocialMediaService {
       }
     });
 
+    if (normalizedMentionUserIds !== undefined) {
+      const previousMentionIds = new Set(
+        post.mentions.map((item) => item.mentioned_user_id),
+      );
+      const newlyMentionedUserIds = normalizedMentionUserIds.filter(
+        (mentionedUserId) => !previousMentionIds.has(mentionedUserId),
+      );
+
+      if (newlyMentionedUserIds.length) {
+        await this.notifyPostMentions(userId, postId, newlyMentionedUserIds);
+      }
+    }
+
     return this.getPostOrThrow(postId);
   }
 
@@ -552,7 +610,8 @@ export class SocialMediaService {
       },
     });
 
-    const commenterNomComplet = `${createdComment.user.nom} ${createdComment.user.prenom}`.trim();
+    const commenterNomComplet =
+      `${createdComment.user.nom} ${createdComment.user.prenom}`.trim();
 
     const replyToCommentId = this.parseReplyToCommentId(content);
     let repliedUserId: string | null = null;
@@ -759,7 +818,8 @@ export class SocialMediaService {
         haha: 'Haha',
       };
 
-      const reactorNomComplet = `${reactor?.nom ?? ''} ${reactor?.prenom ?? ''}`.trim();
+      const reactorNomComplet =
+        `${reactor?.nom ?? ''} ${reactor?.prenom ?? ''}`.trim();
 
       await this.notificationsService.createPostReactionNotification({
         utilisateurId: post.user_id,

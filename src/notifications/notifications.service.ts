@@ -107,6 +107,13 @@ type PostCommentReplyNotificationPayload = {
   replierNomComplet: string;
 };
 
+type PostMentionNotificationPayload = {
+  utilisateurId: string;
+  postId: string;
+  auteurId: string;
+  auteurNomComplet: string;
+};
+
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -166,7 +173,9 @@ export class NotificationsService {
     });
   }
 
-  async createPostReactionNotification(payload: PostReactionNotificationPayload) {
+  async createPostReactionNotification(
+    payload: PostReactionNotificationPayload,
+  ) {
     return this.prisma.notifications.create({
       data: {
         id_utilisateur: payload.utilisateurId,
@@ -179,6 +188,31 @@ export class NotificationsService {
           reactorNomComplet: payload.reactorNomComplet,
           reactionType: payload.reactionType,
           reactionLabel: payload.reactionLabel,
+        },
+      },
+      select: {
+        id: true,
+        titre: true,
+        message: true,
+        type: true,
+        is_read: true,
+        created_at: true,
+        data: true,
+      },
+    });
+  }
+
+  async createPostMentionNotification(payload: PostMentionNotificationPayload) {
+    return this.prisma.notifications.create({
+      data: {
+        id_utilisateur: payload.utilisateurId,
+        type: 'POST_MENTION',
+        titre: 'Vous avez ete mentionne',
+        message: `${payload.auteurNomComplet} vous a mentionne dans une publication.`,
+        data: {
+          postId: payload.postId,
+          auteurId: payload.auteurId,
+          auteurNomComplet: payload.auteurNomComplet,
         },
       },
       select: {
