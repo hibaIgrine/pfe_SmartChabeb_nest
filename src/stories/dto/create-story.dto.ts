@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsIn,
+  IsNumber,
   IsOptional,
   IsString,
   ValidateNested,
@@ -14,6 +15,10 @@ class StoryMediaDto {
 
   @IsString()
   url!: string;
+
+  @IsOptional()
+  @IsNumber()
+  textY?: number;
 }
 
 export class CreateStoryDto {

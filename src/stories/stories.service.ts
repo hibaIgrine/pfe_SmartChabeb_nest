@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client';
 type StoryMediaItem = {
   type: 'image' | 'video';
   url: string;
+  textY?: number;
 };
 
 @Injectable()
@@ -24,7 +25,9 @@ export class StoriesService {
           typeof item === 'object' &&
           item !== null &&
           typeof (item as StoryMediaItem).url === 'string' &&
-          typeof (item as StoryMediaItem).type === 'string'
+          typeof (item as StoryMediaItem).type === 'string' &&
+          ((item as StoryMediaItem).textY === undefined ||
+            typeof (item as StoryMediaItem).textY === 'number')
         );
       });
     }
@@ -64,6 +67,7 @@ export class StoriesService {
     const storyMedia = dto.media?.map((item) => ({
       type: item.type,
       url: item.url,
+      textY: item.textY,
     }));
 
     const story = await this.prisma.stories.create({
@@ -199,6 +203,55 @@ export class StoriesService {
         ...story,
         hasViewed: story.views.some((v) => v.viewer_id === currentUserId),
         viewCount: story.views.length,
+      }),
+    );
+  }
+
+  /**
+   * Récupérer toutes les stories de l'utilisateur connecté (archive)
+   */
+  async getMyStoriesArchive(userId: string) {
+    const now = new Date();
+
+    const stories = await this.prisma.stories.findMany({
+      where: {
+        user_id: userId,
+      },
+      orderBy: {
+        created_at: 'desc',
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            photo_profil_url: true,
+          },
+        },
+        views: {
+          select: {
+            viewer_id: true,
+            viewed_at: true,
+            viewer: {
+              select: {
+                id: true,
+                nom: true,
+                prenom: true,
+                photo_profil_url: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return stories.map((story) =>
+      this.normalizeStory({
+        ...story,
+        hasViewed: false,
+        viewCount: story.views.length,
+        isExpired: story.expires_at <= now,
       }),
     );
   }

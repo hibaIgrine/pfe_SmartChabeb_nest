@@ -37,6 +37,13 @@ export class StoriesController {
     return this.storiesService.getActiveStoriesByUser(userId, currentUserId);
   }
 
+  @Get('me/archive')
+  @UseGuards(AuthGuard('jwt'))
+  async getMyStoriesArchive(@Request() req) {
+    const userId = req.user.userId;
+    return this.storiesService.getMyStoriesArchive(userId);
+  }
+
   @Post(':storyId/view')
   @UseGuards(AuthGuard('jwt'))
   async markAsViewed(@Param('storyId') storyId: string, @Request() req) {
