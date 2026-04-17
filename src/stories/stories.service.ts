@@ -118,6 +118,14 @@ export class StoriesService {
           select: {
             viewer_id: true,
             viewed_at: true,
+            viewer: {
+              select: {
+                id: true,
+                nom: true,
+                prenom: true,
+                photo_profil_url: true,
+              },
+            },
           },
         },
       },
@@ -165,6 +173,14 @@ export class StoriesService {
           select: {
             viewer_id: true,
             viewed_at: true,
+            viewer: {
+              select: {
+                id: true,
+                nom: true,
+                prenom: true,
+                photo_profil_url: true,
+              },
+            },
           },
         },
       },
