@@ -22,6 +22,11 @@ type NormalizedPublicationMediaItem = {
   name?: string;
 };
 
+type PostWithFavoriteMeta<T> = T & {
+  is_favorite: boolean;
+  favorite_count: number;
+};
+
 const COMMENT_REPLY_TOKEN_REGEX = /\[\[reply:(.*?)\]\]/;
 
 @Injectable()
@@ -246,6 +251,87 @@ export class SocialMediaService {
     return post;
   }
 
+  private async buildFavoriteMeta(
+    postIds: string[],
+    currentUserId?: string,
+  ): Promise<{
+    favoriteCountsByPostId: Map<string, number>;
+    favoritePostIdsByCurrentUser: Set<string>;
+  }> {
+    if (!postIds.length) {
+      return {
+        favoriteCountsByPostId: new Map(),
+        favoritePostIdsByCurrentUser: new Set(),
+      };
+    }
+
+    const favoriteCounts = await this.prisma.post_favorites.groupBy({
+      by: ['post_id'],
+      where: {
+        post_id: { in: postIds },
+      },
+      _count: {
+        post_id: true,
+      },
+    });
+
+    const favoriteCountsByPostId = new Map<string, number>(
+      favoriteCounts.map((item) => [item.post_id, item._count.post_id]),
+    );
+
+    let favoritePostIdsByCurrentUser = new Set<string>();
+
+    if (currentUserId) {
+      const currentUserFavorites = await this.prisma.post_favorites.findMany({
+        where: {
+          user_id: currentUserId,
+          post_id: { in: postIds },
+        },
+        select: {
+          post_id: true,
+        },
+      });
+
+      favoritePostIdsByCurrentUser = new Set(
+        currentUserFavorites.map((item) => item.post_id),
+      );
+    }
+
+    return {
+      favoriteCountsByPostId,
+      favoritePostIdsByCurrentUser,
+    };
+  }
+
+  private withFavoriteMeta<T extends { id: string }>(
+    post: T,
+    favoriteCountsByPostId: Map<string, number>,
+    favoritePostIdsByCurrentUser: Set<string>,
+  ): PostWithFavoriteMeta<T> {
+    return {
+      ...post,
+      is_favorite: favoritePostIdsByCurrentUser.has(post.id),
+      favorite_count: favoriteCountsByPostId.get(post.id) ?? 0,
+    };
+  }
+
+  private async withFavoriteMetaList<T extends { id: string }>(
+    posts: T[],
+    currentUserId?: string,
+  ): Promise<Array<PostWithFavoriteMeta<T>>> {
+    const postIds = posts.map((post) => post.id);
+    const { favoriteCountsByPostId, favoritePostIdsByCurrentUser } =
+      await this.buildFavoriteMeta(postIds, currentUserId);
+
+    return posts.map((post) =>
+      this.withFavoriteMeta(
+        post,
+        favoriteCountsByPostId,
+        favoritePostIdsByCurrentUser,
+      ),
+    );
+  }
+
   async createPost(userId: string, dto: CreatePostDto) {
     const normalizedMedia = this.normalizeMedia(dto.media);
     const normalizedHashtags = this.normalizeHashtags(dto.hashtags) ?? [];
@@ -302,7 +388,12 @@ export class SocialMediaService {
       );
     }
 
-    return this.getPostOrThrow(created.id);
+    const createdPost = await this.getPostOrThrow(created.id);
+    const [postWithFavorite] = await this.withFavoriteMetaList(
+      [createdPost],
+      userId,
+    );
+    return postWithFavorite;
   }
 
   async findPosts(limit?: string, offset?: string, currentUserId?: string) {
@@ -330,7 +421,7 @@ export class SocialMediaService {
       })),
     );
 
-    return postsWithReactions;
+    return this.withFavoriteMetaList(postsWithReactions, currentUserId);
   }
 
   async findPostById(postId: string, currentUserId?: string) {
@@ -358,10 +449,17 @@ export class SocialMediaService {
       throw new NotFoundException('Publication introuvable');
     }
 
-    return {
+    const enrichedPost = {
       ...post,
       reactions: await this.getReactions(post.id, currentUserId),
     };
+
+    const [postWithFavorite] = await this.withFavoriteMetaList(
+      [enrichedPost],
+      currentUserId,
+    );
+
+    return postWithFavorite;
   }
 
   async updatePost(postId: string, userId: string, dto: UpdatePostDto) {
@@ -467,7 +565,12 @@ export class SocialMediaService {
       }
     }
 
-    return this.getPostOrThrow(postId);
+    const updatedPost = await this.getPostOrThrow(postId);
+    const [postWithFavorite] = await this.withFavoriteMetaList(
+      [updatedPost],
+      userId,
+    );
+    return postWithFavorite;
   }
 
   async deletePost(postId: string, userId: string) {
@@ -574,7 +677,90 @@ export class SocialMediaService {
       return post;
     });
 
-    return this.getPostOrThrow(created.id);
+    const sharedPost = await this.getPostOrThrow(created.id);
+    const [postWithFavorite] = await this.withFavoriteMetaList(
+      [sharedPost],
+      userId,
+    );
+    return postWithFavorite;
+  }
+
+  async addPostToFavorites(postId: string, userId: string) {
+    await this.getPostOrThrow(postId);
+
+    await this.prisma.post_favorites.upsert({
+      where: {
+        post_id_user_id: {
+          post_id: postId,
+          user_id: userId,
+        },
+      },
+      update: {},
+      create: {
+        post_id: postId,
+        user_id: userId,
+      },
+    });
+
+    const post = await this.findPostById(postId, userId);
+    return post;
+  }
+
+  async removePostFromFavorites(postId: string, userId: string) {
+    await this.getPostOrThrow(postId);
+
+    await this.prisma.post_favorites.deleteMany({
+      where: {
+        post_id: postId,
+        user_id: userId,
+      },
+    });
+
+    const post = await this.findPostById(postId, userId);
+    return post;
+  }
+
+  async findMyFavoritePosts(userId: string, limit?: string, offset?: string) {
+    const parsedLimit = Number.parseInt(limit ?? '20', 10);
+    const parsedOffset = Number.parseInt(offset ?? '0', 10);
+
+    const safeLimit = Number.isNaN(parsedLimit)
+      ? 20
+      : Math.min(parsedLimit, 100);
+    const safeOffset = Number.isNaN(parsedOffset)
+      ? 0
+      : Math.max(parsedOffset, 0);
+
+    const favoriteLinks = await this.prisma.post_favorites.findMany({
+      where: { user_id: userId },
+      orderBy: { created_at: 'desc' },
+      take: safeLimit,
+      skip: safeOffset,
+      include: {
+        post: {
+          include: this.postInclude,
+        },
+      },
+    });
+
+    const posts = favoriteLinks.map((item) => item.post);
+
+    const postsWithReactions = await Promise.all(
+      posts.map(async (post) => ({
+        ...post,
+        reactions: await this.getReactions(post.id, userId),
+      })),
+    );
+
+    return this.withFavoriteMetaList(postsWithReactions, userId);
+  }
+
+  async getMyFavoritePostsCount(userId: string) {
+    const count = await this.prisma.post_favorites.count({
+      where: { user_id: userId },
+    });
+
+    return { count };
   }
 
   async createComment(postId: string, userId: string, dto: CreateCommentDto) {

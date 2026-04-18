@@ -56,6 +56,7 @@ model utilisateurs {
   event_feedbacks     eventFeedbacks[]
   notifications       notifications[]
   posts               posts[]
+  post_favorites      post_favorites[]
   comments            comments[]
   post_reactions      post_reactions[]
   post_mentions_received post_mentions[]   @relation("post_mentioned_user")
@@ -389,9 +390,24 @@ model posts {
   hashtags     post_hashtags[]
   mentions     post_mentions[]
   reactions    post_reactions[]
+  favorites    post_favorites[]
 
   @@index([user_id, created_at])
   @@index([created_at])
+}
+
+model post_favorites {
+  id         String   @id @default(uuid()) @db.Uuid
+  post_id    String   @db.Uuid
+  user_id    String   @db.Uuid
+  created_at DateTime @default(now())
+
+  post       posts         @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  user       utilisateurs  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, user_id])
+  @@index([post_id])
+  @@index([user_id, created_at])
 }
 
 model post_reactions {

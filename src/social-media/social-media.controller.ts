@@ -129,4 +129,35 @@ export class SocialMediaController {
   getReactions(@Param('id') postId: string, @Request() req: any) {
     return this.socialMediaService.getReactions(postId, req.user.userId);
   }
+
+  @Post('posts/:id/favorites')
+  addToFavorites(@Param('id') postId: string, @Request() req: any) {
+    return this.socialMediaService.addPostToFavorites(postId, req.user.userId);
+  }
+
+  @Delete('posts/:id/favorites')
+  removeFromFavorites(@Param('id') postId: string, @Request() req: any) {
+    return this.socialMediaService.removePostFromFavorites(
+      postId,
+      req.user.userId,
+    );
+  }
+
+  @Get('favorites/posts')
+  findMyFavoritePosts(
+    @Request() req: any,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.socialMediaService.findMyFavoritePosts(
+      req.user.userId,
+      limit,
+      offset,
+    );
+  }
+
+  @Get('favorites/count')
+  getMyFavoritePostsCount(@Request() req: any) {
+    return this.socialMediaService.getMyFavoritePostsCount(req.user.userId);
+  }
 }
