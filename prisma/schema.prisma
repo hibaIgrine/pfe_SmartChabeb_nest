@@ -57,6 +57,9 @@ model utilisateurs {
   notifications       notifications[]
   posts               posts[]
   post_favorites      post_favorites[]
+  hidden_users        user_hidden_users[]    @relation("user_hidden_author")
+  hidden_by_users     user_hidden_users[]    @relation("user_hidden_target")
+  hidden_from_posts   post_hidden_users[]    @relation("post_hidden_target")
   comments            comments[]
   post_reactions      post_reactions[]
   post_mentions_received post_mentions[]   @relation("post_mentioned_user")
@@ -380,6 +383,7 @@ model posts {
   id           String   @id @default(uuid()) @db.Uuid
   user_id      String   @db.Uuid
   content      String   @db.Text
+  visibility   String   @default("PUBLIC") @db.VarChar(20)
   location     String?  @db.VarChar(255)
   media        Json?
   created_at   DateTime @default(now())
@@ -391,9 +395,38 @@ model posts {
   mentions     post_mentions[]
   reactions    post_reactions[]
   favorites    post_favorites[]
+  hidden_users post_hidden_users[]
 
   @@index([user_id, created_at])
   @@index([created_at])
+}
+
+model post_hidden_users {
+  id             String   @id @default(uuid()) @db.Uuid
+  post_id        String   @db.Uuid
+  hidden_user_id String   @db.Uuid
+  created_at     DateTime @default(now())
+
+  post           posts         @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  hidden_user    utilisateurs  @relation("post_hidden_target", fields: [hidden_user_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, hidden_user_id])
+  @@index([post_id])
+  @@index([hidden_user_id])
+}
+
+model user_hidden_users {
+  id             String   @id @default(uuid()) @db.Uuid
+  user_id        String   @db.Uuid
+  hidden_user_id String   @db.Uuid
+  created_at     DateTime @default(now())
+
+  user           utilisateurs @relation("user_hidden_author", fields: [user_id], references: [id], onDelete: Cascade)
+  hidden_user    utilisateurs @relation("user_hidden_target", fields: [hidden_user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, hidden_user_id])
+  @@index([user_id, created_at])
+  @@index([hidden_user_id])
 }
 
 model post_favorites {

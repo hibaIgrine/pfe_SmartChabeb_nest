@@ -27,6 +27,8 @@ type PostWithFavoriteMeta<T> = T & {
   favorite_count: number;
 };
 
+type PostVisibility = 'PUBLIC' | 'PRIVATE' | 'MASKED';
+
 const COMMENT_REPLY_TOKEN_REGEX = /\[\[reply:(.*?)\]\]/;
 
 @Injectable()
@@ -54,6 +56,18 @@ export class SocialMediaService {
     mentions: {
       include: {
         mentioned_user: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            photo_profil_url: true,
+          },
+        },
+      },
+    },
+    hidden_users: {
+      include: {
+        hidden_user: {
           select: {
             id: true,
             nom: true,
@@ -135,6 +149,97 @@ export class SocialMediaService {
     );
 
     return normalized;
+  }
+
+  private normalizeVisibility(visibility?: string): PostVisibility {
+    if (visibility === 'PRIVATE') {
+      return 'PRIVATE';
+    }
+    if (visibility === 'MASKED') {
+      return 'MASKED';
+    }
+    return 'PUBLIC';
+  }
+
+  private canUserViewPost(
+    post: { user_id: string; visibility: string | null },
+    currentUserId?: string,
+  ) {
+    const normalizedVisibility = this.normalizeVisibility(
+      post.visibility ?? undefined,
+    );
+    if (normalizedVisibility === 'PUBLIC') {
+      return true;
+    }
+
+    if (normalizedVisibility === 'MASKED') {
+      return true;
+    }
+
+    return Boolean(currentUserId && post.user_id === currentUserId);
+  }
+
+  private normalizeHiddenUserIds(userIds?: string[]): string[] | undefined {
+    if (!userIds) {
+      return undefined;
+    }
+
+    const normalized = Array.from(
+      new Set(userIds.map((id) => id.trim())),
+    ).filter(Boolean);
+
+    return normalized;
+  }
+
+  private async getHiddenUserIdsFor(userId: string): Promise<string[]> {
+    const hiddenLinks = await this.prisma.user_hidden_users.findMany({
+      where: { user_id: userId },
+      select: { hidden_user_id: true },
+    });
+
+    return hiddenLinks.map((item) => item.hidden_user_id);
+  }
+
+  private async ensurePostVisibleToUser(postId: string, currentUserId: string) {
+    const post = await this.prisma.posts.findUnique({
+      where: { id: postId },
+      select: {
+        id: true,
+        user_id: true,
+        visibility: true,
+        hidden_users: {
+          where: {
+            hidden_user_id: currentUserId,
+          },
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
+
+    if (!post) {
+      throw new NotFoundException('Publication introuvable');
+    }
+
+    if (!this.canUserViewPost(post, currentUserId)) {
+      throw new ForbiddenException('Cette publication est privee');
+    }
+
+    if (
+      this.normalizeVisibility(post.visibility ?? undefined) === 'MASKED' &&
+      post.user_id !== currentUserId &&
+      post.hidden_users.length > 0
+    ) {
+      throw new ForbiddenException('Cette publication est masquee');
+    }
+
+    const hiddenUserIds = await this.getHiddenUserIdsFor(currentUserId);
+    if (hiddenUserIds.includes(post.user_id)) {
+      throw new ForbiddenException('Cette publication est masquee');
+    }
+
+    return post;
   }
 
   private parseReplyToCommentId(content: string): string | null {
@@ -337,7 +442,10 @@ export class SocialMediaService {
     const normalizedHashtags = this.normalizeHashtags(dto.hashtags) ?? [];
     const normalizedMentionUserIds =
       this.normalizeMentionUserIds(dto.mentioned_user_ids) ?? [];
+    const normalizedHiddenUserIds =
+      this.normalizeHiddenUserIds(dto.hidden_user_ids) ?? [];
     const normalizedLocation = dto.location?.trim() || undefined;
+    const normalizedVisibility = this.normalizeVisibility(dto.visibility);
 
     this.ensurePublicationContent(
       dto.content,
@@ -348,12 +456,16 @@ export class SocialMediaService {
     );
 
     await this.ensureMentionUsersExist(normalizedMentionUserIds);
+    await this.ensureMentionUsersExist(
+      normalizedHiddenUserIds.filter((id) => id !== userId),
+    );
 
     const created = await this.prisma.$transaction(async (tx) => {
       const post = await tx.posts.create({
         data: {
           user_id: userId,
           content: dto.content?.trim() || '',
+          visibility: normalizedVisibility,
           location: normalizedLocation,
           media: normalizedMedia as Prisma.InputJsonValue | undefined,
         },
@@ -374,6 +486,17 @@ export class SocialMediaService {
             post_id: post.id,
             mentioned_user_id: mentionedUserId,
           })),
+        });
+      }
+
+      if (normalizedHiddenUserIds.length) {
+        await tx.post_hidden_users.createMany({
+          data: normalizedHiddenUserIds
+            .filter((hiddenUserId) => hiddenUserId !== userId)
+            .map((hiddenUserId) => ({
+              post_id: post.id,
+              hidden_user_id: hiddenUserId,
+            })),
         });
       }
 
@@ -407,7 +530,36 @@ export class SocialMediaService {
       ? 0
       : Math.max(parsedOffset, 0);
 
+    const hiddenUserIds = currentUserId
+      ? await this.getHiddenUserIdsFor(currentUserId)
+      : [];
+
     const posts = await this.prisma.posts.findMany({
+      where: {
+        AND: [
+          {
+            OR: currentUserId
+              ? [
+                  { visibility: 'PUBLIC' },
+                  { user_id: currentUserId },
+                  {
+                    AND: [
+                      { visibility: 'MASKED' },
+                      {
+                        hidden_users: {
+                          none: {
+                            hidden_user_id: currentUserId,
+                          },
+                        },
+                      },
+                    ],
+                  },
+                ]
+              : [{ visibility: 'PUBLIC' }],
+          },
+          hiddenUserIds.length ? { user_id: { notIn: hiddenUserIds } } : {},
+        ],
+      },
       orderBy: { created_at: 'desc' },
       take: safeLimit,
       skip: safeOffset,
@@ -425,6 +577,10 @@ export class SocialMediaService {
   }
 
   async findPostById(postId: string, currentUserId?: string) {
+    if (currentUserId) {
+      await this.ensurePostVisibleToUser(postId, currentUserId);
+    }
+
     const post = await this.prisma.posts.findUnique({
       where: { id: postId },
       include: {
@@ -468,6 +624,7 @@ export class SocialMediaService {
       include: {
         hashtags: { select: { hashtag: true } },
         mentions: { select: { mentioned_user_id: true } },
+        hidden_users: { select: { hidden_user_id: true } },
       },
     });
 
@@ -491,10 +648,17 @@ export class SocialMediaService {
       dto.location !== undefined
         ? dto.location?.trim() || ''
         : post.location || '';
+    const nextVisibility =
+      dto.visibility !== undefined
+        ? this.normalizeVisibility(dto.visibility)
+        : this.normalizeVisibility(post.visibility ?? undefined);
 
     const normalizedHashtags = this.normalizeHashtags(dto.hashtags);
     const normalizedMentionUserIds = this.normalizeMentionUserIds(
       dto.mentioned_user_ids,
+    );
+    const normalizedHiddenUserIds = this.normalizeHiddenUserIds(
+      dto.hidden_user_ids,
     );
 
     const nextHashtags =
@@ -507,6 +671,13 @@ export class SocialMediaService {
         ? normalizedMentionUserIds
         : post.mentions.map((item) => item.mentioned_user_id);
 
+    const nextHiddenUserIds =
+      normalizedHiddenUserIds !== undefined
+        ? normalizedHiddenUserIds.filter(
+            (hiddenUserId) => hiddenUserId !== userId,
+          )
+        : post.hidden_users.map((item) => item.hidden_user_id);
+
     this.ensurePublicationContent(
       nextContent,
       nextMedia,
@@ -516,12 +687,14 @@ export class SocialMediaService {
     );
 
     await this.ensureMentionUsersExist(nextMentionUserIds);
+    await this.ensureMentionUsersExist(nextHiddenUserIds);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.posts.update({
         where: { id: postId },
         data: {
           content: nextContent?.trim() || '',
+          visibility: nextVisibility,
           location: nextLocation || null,
           media: nextMedia as Prisma.InputJsonValue | undefined,
         },
@@ -546,6 +719,18 @@ export class SocialMediaService {
             data: normalizedMentionUserIds.map((mentionedUserId) => ({
               post_id: postId,
               mentioned_user_id: mentionedUserId,
+            })),
+          });
+        }
+      }
+
+      if (normalizedHiddenUserIds !== undefined) {
+        await tx.post_hidden_users.deleteMany({ where: { post_id: postId } });
+        if (nextHiddenUserIds.length) {
+          await tx.post_hidden_users.createMany({
+            data: nextHiddenUserIds.map((hiddenUserId) => ({
+              post_id: postId,
+              hidden_user_id: hiddenUserId,
             })),
           });
         }
@@ -595,11 +780,14 @@ export class SocialMediaService {
   }
 
   async sharePost(postId: string, userId: string, dto: SharePostDto) {
+    await this.ensurePostVisibleToUser(postId, userId);
+
     const sourcePost = await this.prisma.posts.findUnique({
       where: { id: postId },
       include: {
         user: {
           select: {
+            id: true,
             nom: true,
             prenom: true,
           },
@@ -651,6 +839,7 @@ export class SocialMediaService {
         data: {
           user_id: userId,
           content: sharedContent,
+          visibility: 'PUBLIC',
           location: sourcePost.location,
           media: sourceMedia as Prisma.InputJsonValue | undefined,
         },
@@ -686,7 +875,7 @@ export class SocialMediaService {
   }
 
   async addPostToFavorites(postId: string, userId: string) {
-    await this.getPostOrThrow(postId);
+    await this.ensurePostVisibleToUser(postId, userId);
 
     await this.prisma.post_favorites.upsert({
       where: {
@@ -707,7 +896,7 @@ export class SocialMediaService {
   }
 
   async removePostFromFavorites(postId: string, userId: string) {
-    await this.getPostOrThrow(postId);
+    await this.ensurePostVisibleToUser(postId, userId);
 
     await this.prisma.post_favorites.deleteMany({
       where: {
@@ -731,8 +920,35 @@ export class SocialMediaService {
       ? 0
       : Math.max(parsedOffset, 0);
 
+    const hiddenUserIds = await this.getHiddenUserIdsFor(userId);
+
     const favoriteLinks = await this.prisma.post_favorites.findMany({
-      where: { user_id: userId },
+      where: {
+        user_id: userId,
+        post: {
+          AND: [
+            {
+              OR: [
+                { visibility: 'PUBLIC' },
+                { user_id: userId },
+                {
+                  AND: [
+                    { visibility: 'MASKED' },
+                    {
+                      hidden_users: {
+                        none: {
+                          hidden_user_id: userId,
+                        },
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+            hiddenUserIds.length ? { user_id: { notIn: hiddenUserIds } } : {},
+          ],
+        },
+      },
       orderBy: { created_at: 'desc' },
       take: safeLimit,
       skip: safeOffset,
@@ -775,11 +991,20 @@ export class SocialMediaService {
 
     const post = await this.prisma.posts.findUnique({
       where: { id: postId },
-      select: { id: true, user_id: true },
+      select: { id: true, user_id: true, visibility: true },
     });
 
     if (!post) {
       throw new NotFoundException('Publication introuvable');
+    }
+
+    if (!this.canUserViewPost(post, userId)) {
+      throw new ForbiddenException('Cette publication est privee');
+    }
+
+    const hiddenUserIds = await this.getHiddenUserIdsFor(userId);
+    if (hiddenUserIds.includes(post.user_id)) {
+      throw new ForbiddenException('Cette publication est masquee');
     }
 
     const createdComment = await this.prisma.comments.create({
@@ -943,12 +1168,75 @@ export class SocialMediaService {
     return { success: true };
   }
 
-  async findCommentsByPost(postId: string) {
+  async findCommentsByPost(postId: string, currentUserId: string) {
+    await this.ensurePostVisibleToUser(postId, currentUserId);
+
     return this.prisma.comments.findMany({
       where: { post_id: postId },
       orderBy: { created_at: 'asc' },
       include: {
         user: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            photo_profil_url: true,
+          },
+        },
+      },
+    });
+  }
+
+  async hideUser(userId: string, userIdToHide: string) {
+    if (userId === userIdToHide) {
+      throw new BadRequestException(
+        'Vous ne pouvez pas vous masquer vous-meme',
+      );
+    }
+
+    const targetUser = await this.prisma.utilisateurs.findUnique({
+      where: { id: userIdToHide },
+      select: { id: true },
+    });
+
+    if (!targetUser) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    await this.prisma.user_hidden_users.upsert({
+      where: {
+        user_id_hidden_user_id: {
+          user_id: userId,
+          hidden_user_id: userIdToHide,
+        },
+      },
+      update: {},
+      create: {
+        user_id: userId,
+        hidden_user_id: userIdToHide,
+      },
+    });
+
+    return { success: true };
+  }
+
+  async unhideUser(userId: string, userIdToUnhide: string) {
+    await this.prisma.user_hidden_users.deleteMany({
+      where: {
+        user_id: userId,
+        hidden_user_id: userIdToUnhide,
+      },
+    });
+
+    return { success: true };
+  }
+
+  async findHiddenUsers(userId: string) {
+    return this.prisma.user_hidden_users.findMany({
+      where: { user_id: userId },
+      orderBy: { created_at: 'desc' },
+      include: {
+        hidden_user: {
           select: {
             id: true,
             nom: true,

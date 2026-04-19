@@ -75,8 +75,8 @@ export class SocialMediaController {
   }
 
   @Get('posts/:id/comments')
-  findComments(@Param('id') postId: string) {
-    return this.socialMediaService.findCommentsByPost(postId);
+  findComments(@Param('id') postId: string, @Request() req: any) {
+    return this.socialMediaService.findCommentsByPost(postId, req.user.userId);
   }
 
   @Patch('posts/:postId/comments/:commentId')
@@ -159,5 +159,20 @@ export class SocialMediaController {
   @Get('favorites/count')
   getMyFavoritePostsCount(@Request() req: any) {
     return this.socialMediaService.getMyFavoritePostsCount(req.user.userId);
+  }
+
+  @Post('users/:id/hide')
+  hideUser(@Param('id') userIdToHide: string, @Request() req: any) {
+    return this.socialMediaService.hideUser(req.user.userId, userIdToHide);
+  }
+
+  @Delete('users/:id/hide')
+  unhideUser(@Param('id') userIdToUnhide: string, @Request() req: any) {
+    return this.socialMediaService.unhideUser(req.user.userId, userIdToUnhide);
+  }
+
+  @Get('users/hidden')
+  findHiddenUsers(@Request() req: any) {
+    return this.socialMediaService.findHiddenUsers(req.user.userId);
   }
 }

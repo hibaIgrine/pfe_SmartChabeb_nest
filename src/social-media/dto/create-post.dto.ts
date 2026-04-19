@@ -11,8 +11,15 @@ import {
 } from 'class-validator';
 
 export const publicationMediaTypes = ['image', 'video', 'document'] as const;
+export const publicationVisibilityOptions = [
+  'PUBLIC',
+  'PRIVATE',
+  'MASKED',
+] as const;
 
 export type PublicationMediaType = (typeof publicationMediaTypes)[number];
+export type PublicationVisibility =
+  (typeof publicationVisibilityOptions)[number];
 
 export class PublicationMediaItemDto {
   @ApiProperty({ enum: publicationMediaTypes })
@@ -48,6 +55,12 @@ export class CreatePostDto {
   @IsString()
   location?: string;
 
+  @ApiPropertyOptional({ enum: publicationVisibilityOptions })
+  @IsOptional()
+  @IsString()
+  @IsIn(publicationVisibilityOptions)
+  visibility?: PublicationVisibility;
+
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
@@ -63,4 +76,12 @@ export class CreatePostDto {
   @ArrayUnique()
   @IsUUID('all', { each: true })
   mentioned_user_ids?: string[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  hidden_user_ids?: string[];
 }
