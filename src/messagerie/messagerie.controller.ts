@@ -1,15 +1,14 @@
 import {
   Body,
   Controller,
+  Patch,
   Get,
   Param,
   Post,
-  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { AddParticipantDto } from './dto/add-participant.dto';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { MessagerieService } from './messagerie.service';
@@ -19,9 +18,20 @@ import { MessagerieService } from './messagerie.service';
 export class MessagerieController {
   constructor(private readonly messagerieService: MessagerieService) {}
 
-  @Post('conversations')
-  createConversation(@Request() req: any, @Body() body: CreateConversationDto) {
-    return this.messagerieService.createConversation(req.user.userId, body);
+  @Get('unread-count')
+  getUnreadCount(@Request() req: any) {
+    return this.messagerieService.getUnreadMessagesCount(req.user.userId);
+  }
+
+  @Post('conversations/private')
+  createPrivateConversation(
+    @Request() req: any,
+    @Body() body: CreateConversationDto,
+  ) {
+    return this.messagerieService.createPrivateConversation(
+      req.user.userId,
+      body,
+    );
   }
 
   @Get('conversations/me')
@@ -32,19 +42,6 @@ export class MessagerieController {
   @Get('conversations/:id')
   getConversationById(@Param('id') id: string, @Request() req: any) {
     return this.messagerieService.getConversationById(id, req.user.userId);
-  }
-
-  @Post('conversations/:id/participants')
-  addParticipant(
-    @Param('id') conversationId: string,
-    @Request() req: any,
-    @Body() body: AddParticipantDto,
-  ) {
-    return this.messagerieService.addParticipant(
-      conversationId,
-      req.user.userId,
-      body.userId,
-    );
   }
 
   @Get('conversations/:id/messages')
@@ -62,6 +59,17 @@ export class MessagerieController {
       conversationId,
       req.user.userId,
       body,
+    );
+  }
+
+  @Patch('conversations/:id/read')
+  markConversationAsRead(
+    @Param('id') conversationId: string,
+    @Request() req: any,
+  ) {
+    return this.messagerieService.markConversationAsRead(
+      conversationId,
+      req.user.userId,
     );
   }
 }
