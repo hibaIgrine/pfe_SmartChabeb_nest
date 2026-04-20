@@ -23,14 +23,52 @@ import {
 
 @Injectable()
 export class MessagerieService {
+  private readonly onlineWindowMs = 2 * 60 * 1000;
+
   private readonly participantPreviewSelect = {
     id: true,
     nom: true,
     prenom: true,
     photo_profil_url: true,
+    is_online: true,
+    last_seen_at: true,
   } as const;
 
   constructor(private readonly prisma: PrismaService) {}
+
+  async updateMyPresenceHeartbeat(userId: string) {
+    const now = new Date();
+
+    await this.prisma.utilisateurs.update({
+      where: { id: userId },
+      data: {
+        is_online: true,
+        last_seen_at: now,
+      },
+    });
+
+    return {
+      is_online: true,
+      last_seen_at: now,
+    };
+  }
+
+  async updateMyPresenceOffline(userId: string) {
+    const now = new Date();
+
+    await this.prisma.utilisateurs.update({
+      where: { id: userId },
+      data: {
+        is_online: false,
+        last_seen_at: now,
+      },
+    });
+
+    return {
+      is_online: false,
+      last_seen_at: now,
+    };
+  }
 
   async getUnreadMessagesCount(userId: string) {
     const count = await this.prisma.messages.count({
@@ -547,7 +585,7 @@ export class MessagerieService {
       last_message_at: conversation.last_message_at,
       participant_count: conversation.participants.length,
       current_user_role: currentParticipant?.role ?? null,
-      counterpart: counterpart?.user ?? null,
+      counterpart: this.mapPresenceUser(counterpart?.user),
       last_message: conversation.messages[0] ?? null,
     };
   }
@@ -579,12 +617,39 @@ export class MessagerieService {
       last_message_at: conversation.last_message_at,
       participant_count: conversation.participants.length,
       current_user_role: currentParticipant?.role ?? null,
-      counterpart: counterpart?.user ?? null,
+      counterpart: this.mapPresenceUser(counterpart?.user),
       participants: conversation.participants.map((participant) => ({
         ...participant,
-        user: participant.user,
+        user: this.mapPresenceUser(participant.user),
       })),
       messages: conversation.messages,
+    };
+  }
+
+  private mapPresenceUser(
+    user:
+      | {
+          id: string;
+          nom: string;
+          prenom: string;
+          photo_profil_url: string | null;
+          is_online: boolean | null;
+          last_seen_at: Date | null;
+        }
+      | null
+      | undefined,
+  ) {
+    if (!user) {
+      return null;
+    }
+
+    const hasRecentActivity =
+      user.last_seen_at !== null &&
+      Date.now() - user.last_seen_at.getTime() <= this.onlineWindowMs;
+
+    return {
+      ...user,
+      is_online: Boolean(user.is_online) && hasRecentActivity,
     };
   }
 }

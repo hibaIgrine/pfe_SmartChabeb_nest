@@ -27,6 +27,16 @@ export class MessagerieController {
     return this.messagerieService.getUnreadMessagesCount(req.user.userId);
   }
 
+  @Patch('presence/heartbeat')
+  heartbeat(@Request() req: any) {
+    return this.messagerieService.updateMyPresenceHeartbeat(req.user.userId);
+  }
+
+  @Patch('presence/offline')
+  markOffline(@Request() req: any) {
+    return this.messagerieService.updateMyPresenceOffline(req.user.userId);
+  }
+
   @Post('conversations/private')
   createPrivateConversation(
     @Request() req: any,
