@@ -134,6 +134,26 @@ export class MessagerieService {
   }
 
   async getMyConversations(userId: string) {
+    await this.prisma.messages.updateMany({
+      where: {
+        sender_id: {
+          not: userId,
+        },
+        status: 'SENT',
+        conversation: {
+          participants: {
+            some: {
+              user_id: userId,
+            },
+          },
+        },
+      },
+      data: {
+        status: 'DELIVERED',
+        delivered_at: new Date(),
+      },
+    });
+
     const memberships = await this.prisma.conversation_participants.findMany({
       where: { user_id: userId },
       include: {
@@ -299,9 +319,7 @@ export class MessagerieService {
           sender_id: {
             not: userId,
           },
-          status: {
-            in: ['SENT', 'DELIVERED'],
-          },
+          status: 'DELIVERED',
         },
         data: {
           status: 'READ',
