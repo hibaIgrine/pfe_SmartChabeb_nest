@@ -28,6 +28,25 @@ export function normalizeMediaUrls(media?: string[]) {
   return normalizedMedia.length > 0 ? normalizedMedia : null;
 }
 
+export function normalizeUserIds(userIds?: string[]) {
+  if (!userIds || userIds.length === 0) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(userIds.map((item) => item.trim()).filter(Boolean)),
+  );
+}
+
+export function normalizeConversationTitle(title?: string) {
+  if (typeof title !== 'string') {
+    return null;
+  }
+
+  const normalizedTitle = title.trim();
+  return normalizedTitle.length > 0 ? normalizedTitle : null;
+}
+
 export function assertPrivateMessagePayload(
   type: string,
   content: string | null,
@@ -43,5 +62,19 @@ export function assertPrivateMessagePayload(
     throw new BadRequestException(
       'Un message image, video ou document doit contenir au moins un fichier',
     );
+  }
+}
+
+export function assertGroupMessagePayload(
+  type: string,
+  content: string | null,
+  media: string[] | null,
+) {
+  return assertPrivateMessagePayload(type, content, media);
+}
+
+export function assertValidGroupTitle(title: string | null) {
+  if (!title) {
+    throw new BadRequestException('Le nom du groupe est obligatoire');
   }
 }

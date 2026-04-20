@@ -5,12 +5,16 @@ import {
   Get,
   Param,
   Post,
+  Delete,
   Request,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CreateConversationDto } from './dto/create-conversation.dto';
+import { CreateGroupConversationDto } from './dto/create-group-conversation.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
+import { UpdateConversationMembersDto } from './dto/update-conversation-members.dto';
+import { UpdateConversationTitleDto } from './dto/update-conversation-title.dto';
 import { MessagerieService } from './messagerie.service';
 
 @Controller('messagerie')
@@ -34,6 +38,17 @@ export class MessagerieController {
     );
   }
 
+  @Post('conversations/group')
+  createGroupConversation(
+    @Request() req: any,
+    @Body() body: CreateGroupConversationDto,
+  ) {
+    return this.messagerieService.createGroupConversation(
+      req.user.userId,
+      body,
+    );
+  }
+
   @Get('conversations/me')
   getMyConversations(@Request() req: any) {
     return this.messagerieService.getMyConversations(req.user.userId);
@@ -47,6 +62,45 @@ export class MessagerieController {
   @Get('conversations/:id/messages')
   getMessages(@Param('id') conversationId: string, @Request() req: any) {
     return this.messagerieService.getMessages(conversationId, req.user.userId);
+  }
+
+  @Patch('conversations/:id/title')
+  renameGroupConversation(
+    @Param('id') conversationId: string,
+    @Request() req: any,
+    @Body() body: UpdateConversationTitleDto,
+  ) {
+    return this.messagerieService.renameGroupConversation(
+      conversationId,
+      req.user.userId,
+      body,
+    );
+  }
+
+  @Post('conversations/:id/members')
+  addGroupMembers(
+    @Param('id') conversationId: string,
+    @Request() req: any,
+    @Body() body: UpdateConversationMembersDto,
+  ) {
+    return this.messagerieService.addGroupMembers(
+      conversationId,
+      req.user.userId,
+      body,
+    );
+  }
+
+  @Delete('conversations/:id/members/:memberUserId')
+  removeGroupMember(
+    @Param('id') conversationId: string,
+    @Param('memberUserId') memberUserId: string,
+    @Request() req: any,
+  ) {
+    return this.messagerieService.removeGroupMember(
+      conversationId,
+      req.user.userId,
+      memberUserId,
+    );
   }
 
   @Post('conversations/:id/messages')

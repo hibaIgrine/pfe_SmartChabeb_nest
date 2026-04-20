@@ -7,12 +7,18 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateConversationDto } from './dto/create-conversation.dto';
+import { CreateGroupConversationDto } from './dto/create-group-conversation.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
+import { UpdateConversationMembersDto } from './dto/update-conversation-members.dto';
+import { UpdateConversationTitleDto } from './dto/update-conversation-title.dto';
 import {
   assertPrivateMessagePayload,
+  assertValidGroupTitle,
   buildPrivateConversationKey,
   normalizeMediaUrls,
   normalizeMessageContent,
+  normalizeConversationTitle,
+  normalizeUserIds,
 } from './messagerie.utils';
 
 @Injectable()
@@ -75,6 +81,47 @@ export class MessagerieService {
         created_by: userId,
         participants: {
           create: [userId, recipientId].map((participantId, index) => ({
+            user_id: participantId,
+            role: index === 0 ? 'ADMIN' : 'MEMBER',
+          })),
+        },
+      },
+      include: this.getConversationDetailInclude(),
+    });
+
+    return this.formatConversationDetail(conversation, userId);
+  }
+
+  async createGroupConversation(
+    userId: string,
+    dto: CreateGroupConversationDto,
+  ) {
+    const title = normalizeConversationTitle(dto.title);
+    assertValidGroupTitle(title);
+
+    const participantIds = normalizeUserIds(dto.participantIds).filter(
+      (participantId) => participantId !== userId,
+    );
+
+    if (participantIds.length === 0) {
+      throw new BadRequestException(
+        'Ajoute au moins un utilisateur pour créer un groupe',
+      );
+    }
+
+    await Promise.all(
+      participantIds.map((participantId) =>
+        this.assertUserCanChat(participantId),
+      ),
+    );
+
+    const conversation = await this.prisma.conversations.create({
+      data: {
+        type: 'group',
+        title,
+        created_by: userId,
+        participants: {
+          create: [userId, ...participantIds].map((participantId, index) => ({
             user_id: participantId,
             role: index === 0 ? 'ADMIN' : 'MEMBER',
           })),
@@ -158,23 +205,19 @@ export class MessagerieService {
         throw new NotFoundException('Conversation introuvable');
       }
 
-      const partnerId = conversation.participants.find(
-        (participant) => participant.user_id !== userId,
-      )?.user_id;
-
-      if (partnerId) {
-        await tx.messages.updateMany({
-          where: {
-            conversation_id: conversationId,
-            sender_id: partnerId,
-            status: 'SENT',
+      await tx.messages.updateMany({
+        where: {
+          conversation_id: conversationId,
+          sender_id: {
+            not: userId,
           },
-          data: {
-            status: 'DELIVERED',
-            delivered_at: new Date(),
-          },
-        });
-      }
+          status: 'SENT',
+        },
+        data: {
+          status: 'DELIVERED',
+          delivered_at: new Date(),
+        },
+      });
 
       return tx.messages.findMany({
         where: { conversation_id: conversationId },
@@ -250,26 +293,22 @@ export class MessagerieService {
         throw new NotFoundException('Conversation introuvable');
       }
 
-      const partnerId = conversation.participants.find(
-        (participant) => participant.user_id !== userId,
-      )?.user_id;
-
-      if (partnerId) {
-        await tx.messages.updateMany({
-          where: {
-            conversation_id: conversationId,
-            sender_id: partnerId,
-            status: {
-              in: ['SENT', 'DELIVERED'],
-            },
+      await tx.messages.updateMany({
+        where: {
+          conversation_id: conversationId,
+          sender_id: {
+            not: userId,
           },
-          data: {
-            status: 'READ',
-            read_at: now,
-            delivered_at: now,
+          status: {
+            in: ['SENT', 'DELIVERED'],
           },
-        });
-      }
+        },
+        data: {
+          status: 'READ',
+          read_at: now,
+          delivered_at: now,
+        },
+      });
 
       await tx.conversation_participants.update({
         where: {
@@ -290,6 +329,92 @@ export class MessagerieService {
     });
   }
 
+  async renameGroupConversation(
+    conversationId: string,
+    userId: string,
+    dto: UpdateConversationTitleDto,
+  ) {
+    await this.assertGroupAdmin(conversationId, userId);
+
+    const title = normalizeConversationTitle(dto.title);
+    assertValidGroupTitle(title);
+
+    const conversation = await this.prisma.conversations.update({
+      where: { id: conversationId },
+      data: { title },
+      include: this.getConversationDetailInclude(),
+    });
+
+    return this.formatConversationDetail(conversation, userId);
+  }
+
+  async addGroupMembers(
+    conversationId: string,
+    userId: string,
+    dto: UpdateConversationMembersDto,
+  ) {
+    await this.assertGroupAdmin(conversationId, userId);
+
+    const memberIds = normalizeUserIds(dto.userIds).filter(
+      (memberId) => memberId !== userId,
+    );
+
+    if (memberIds.length === 0) {
+      throw new BadRequestException('Aucun utilisateur a ajouter');
+    }
+
+    await Promise.all(
+      memberIds.map((memberId) => this.assertUserCanChat(memberId)),
+    );
+
+    await this.prisma.conversation_participants.createMany({
+      data: memberIds.map((memberId) => ({
+        conversation_id: conversationId,
+        user_id: memberId,
+        role: 'MEMBER',
+      })),
+      skipDuplicates: true,
+    });
+
+    return this.getConversationById(conversationId, userId);
+  }
+
+  async removeGroupMember(
+    conversationId: string,
+    userId: string,
+    memberUserId: string,
+  ) {
+    await this.assertGroupAdmin(conversationId, userId);
+
+    const conversation = await this.prisma.conversations.findUnique({
+      where: { id: conversationId },
+      select: { created_by: true, type: true },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation introuvable');
+    }
+
+    if (conversation.type !== 'group') {
+      throw new BadRequestException('Cette action est réservée aux groupes');
+    }
+
+    if (memberUserId === conversation.created_by) {
+      throw new BadRequestException('Le créateur ne peut pas être supprimé');
+    }
+
+    await this.prisma.conversation_participants.delete({
+      where: {
+        conversation_id_user_id: {
+          conversation_id: conversationId,
+          user_id: memberUserId,
+        },
+      },
+    });
+
+    return this.getConversationById(conversationId, userId);
+  }
+
   private async assertMembership(conversationId: string, userId: string) {
     const membership = await this.prisma.conversation_participants.findUnique({
       where: {
@@ -304,6 +429,38 @@ export class MessagerieService {
     if (!membership) {
       throw new ForbiddenException(
         'Vous ne participez pas a cette conversation',
+      );
+    }
+  }
+
+  private async assertGroupAdmin(conversationId: string, userId: string) {
+    const conversation = await this.prisma.conversations.findUnique({
+      where: { id: conversationId },
+      select: {
+        type: true,
+        created_by: true,
+        participants: {
+          where: { user_id: userId },
+          select: { role: true },
+        },
+      },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation introuvable');
+    }
+
+    if (conversation.type !== 'group') {
+      throw new BadRequestException('Cette action est réservée aux groupes');
+    }
+
+    const currentRole = conversation.participants[0]?.role;
+    const isAdmin =
+      conversation.created_by === userId || currentRole === 'ADMIN';
+
+    if (!isAdmin) {
+      throw new ForbiddenException(
+        'Seul le créateur du groupe peut faire cette action',
       );
     }
   }
@@ -351,8 +508,15 @@ export class MessagerieService {
     }>,
     currentUserId: string,
   ) {
-    const counterpart = conversation.participants.find(
-      (participant) => participant.user_id !== currentUserId,
+    const counterpart =
+      conversation.type === 'private'
+        ? conversation.participants.find(
+            (participant) => participant.user_id !== currentUserId,
+          )
+        : null;
+
+    const currentParticipant = conversation.participants.find(
+      (participant) => participant.user_id === currentUserId,
     );
 
     return {
@@ -363,6 +527,8 @@ export class MessagerieService {
       created_at: conversation.created_at,
       updated_at: conversation.updated_at,
       last_message_at: conversation.last_message_at,
+      participant_count: conversation.participants.length,
+      current_user_role: currentParticipant?.role ?? null,
       counterpart: counterpart?.user ?? null,
       last_message: conversation.messages[0] ?? null,
     };
@@ -374,8 +540,15 @@ export class MessagerieService {
     }>,
     currentUserId: string,
   ) {
-    const counterpart = conversation.participants.find(
-      (participant) => participant.user_id !== currentUserId,
+    const counterpart =
+      conversation.type === 'private'
+        ? conversation.participants.find(
+            (participant) => participant.user_id !== currentUserId,
+          )
+        : null;
+
+    const currentParticipant = conversation.participants.find(
+      (participant) => participant.user_id === currentUserId,
     );
 
     return {
@@ -386,6 +559,8 @@ export class MessagerieService {
       created_at: conversation.created_at,
       updated_at: conversation.updated_at,
       last_message_at: conversation.last_message_at,
+      participant_count: conversation.participants.length,
+      current_user_role: currentParticipant?.role ?? null,
       counterpart: counterpart?.user ?? null,
       participants: conversation.participants.map((participant) => ({
         ...participant,
