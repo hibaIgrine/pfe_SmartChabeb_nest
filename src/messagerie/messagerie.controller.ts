@@ -13,8 +13,10 @@ import { AuthGuard } from '@nestjs/passport';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { CreateGroupConversationDto } from './dto/create-group-conversation.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
+import { DeleteMessageDto } from './dto/delete-message.dto';
 import { UpdateConversationMembersDto } from './dto/update-conversation-members.dto';
 import { UpdateConversationTitleDto } from './dto/update-conversation-title.dto';
+import { UpdateMessageDto } from './dto/update-message.dto';
 import { MessagerieService } from './messagerie.service';
 
 @Controller('messagerie')
@@ -121,6 +123,36 @@ export class MessagerieController {
   ) {
     return this.messagerieService.sendMessage(
       conversationId,
+      req.user.userId,
+      body,
+    );
+  }
+
+  @Patch('conversations/:id/messages/:messageId')
+  updateMessage(
+    @Param('id') conversationId: string,
+    @Param('messageId') messageId: string,
+    @Request() req: any,
+    @Body() body: UpdateMessageDto,
+  ) {
+    return this.messagerieService.updateMessage(
+      conversationId,
+      messageId,
+      req.user.userId,
+      body,
+    );
+  }
+
+  @Delete('conversations/:id/messages/:messageId')
+  deleteMessage(
+    @Param('id') conversationId: string,
+    @Param('messageId') messageId: string,
+    @Request() req: any,
+    @Body() body: DeleteMessageDto,
+  ) {
+    return this.messagerieService.deleteMessage(
+      conversationId,
+      messageId,
       req.user.userId,
       body,
     );

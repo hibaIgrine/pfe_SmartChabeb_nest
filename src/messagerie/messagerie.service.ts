@@ -9,8 +9,10 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { CreateGroupConversationDto } from './dto/create-group-conversation.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
+import { DeleteMessageDto, DeleteMessageScope } from './dto/delete-message.dto';
 import { UpdateConversationMembersDto } from './dto/update-conversation-members.dto';
 import { UpdateConversationTitleDto } from './dto/update-conversation-title.dto';
+import { UpdateMessageDto } from './dto/update-message.dto';
 import {
   assertPrivateMessagePayload,
   assertValidGroupTitle,
@@ -79,6 +81,12 @@ export class MessagerieService {
         status: {
           in: ['SENT', 'DELIVERED'],
         },
+        deleted_for_everyone_at: null,
+        deleted_for_users: {
+          none: {
+            user_id: userId,
+          },
+        },
         conversation: {
           participants: {
             some: {
@@ -124,7 +132,7 @@ export class MessagerieService {
           })),
         },
       },
-      include: this.getConversationDetailInclude(),
+      include: this.getConversationDetailInclude(userId),
     });
 
     return this.formatConversationDetail(conversation, userId);
@@ -165,7 +173,7 @@ export class MessagerieService {
           })),
         },
       },
-      include: this.getConversationDetailInclude(),
+      include: this.getConversationDetailInclude(userId),
     });
 
     return this.formatConversationDetail(conversation, userId);
@@ -178,6 +186,12 @@ export class MessagerieService {
           not: userId,
         },
         status: 'SENT',
+        deleted_for_everyone_at: null,
+        deleted_for_users: {
+          none: {
+            user_id: userId,
+          },
+        },
         conversation: {
           participants: {
             some: {
@@ -207,6 +221,13 @@ export class MessagerieService {
             messages: {
               take: 1,
               orderBy: { created_at: 'desc' },
+              where: {
+                deleted_for_users: {
+                  none: {
+                    user_id: userId,
+                  },
+                },
+              },
               include: {
                 sender: {
                   select: this.participantPreviewSelect,
@@ -233,7 +254,7 @@ export class MessagerieService {
 
     const conversation = await this.prisma.conversations.findUnique({
       where: { id: conversationId },
-      include: this.getConversationDetailInclude(),
+      include: this.getConversationDetailInclude(userId),
     });
 
     if (!conversation) {
@@ -270,6 +291,12 @@ export class MessagerieService {
             not: userId,
           },
           status: 'SENT',
+          deleted_for_everyone_at: null,
+          deleted_for_users: {
+            none: {
+              user_id: userId,
+            },
+          },
         },
         data: {
           status: 'DELIVERED',
@@ -278,7 +305,14 @@ export class MessagerieService {
       });
 
       return tx.messages.findMany({
-        where: { conversation_id: conversationId },
+        where: {
+          conversation_id: conversationId,
+          deleted_for_users: {
+            none: {
+              user_id: userId,
+            },
+          },
+        },
         orderBy: { created_at: 'asc' },
         include: {
           sender: {
@@ -329,6 +363,134 @@ export class MessagerieService {
     });
   }
 
+  async updateMessage(
+    conversationId: string,
+    messageId: string,
+    userId: string,
+    dto: UpdateMessageDto,
+  ) {
+    await this.assertMembership(conversationId, userId);
+
+    const message = await this.prisma.messages.findFirst({
+      where: {
+        id: messageId,
+        conversation_id: conversationId,
+        deleted_for_everyone_at: null,
+      },
+      include: {
+        sender: {
+          select: this.participantPreviewSelect,
+        },
+      },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message introuvable');
+    }
+
+    if (message.sender_id !== userId) {
+      throw new ForbiddenException("Seul l'auteur peut modifier ce message");
+    }
+
+    const nextType = dto.type ?? message.type;
+    const nextContent =
+      dto.content !== undefined
+        ? normalizeMessageContent(dto.content)
+        : normalizeMessageContent(message.content ?? undefined);
+
+    const existingMedia = this.parseMediaFromMessage(message.media);
+    const nextMedia =
+      dto.media !== undefined ? normalizeMediaUrls(dto.media) : existingMedia;
+
+    assertPrivateMessagePayload(nextType, nextContent, nextMedia ?? null);
+
+    return this.prisma.messages.update({
+      where: { id: messageId },
+      data: {
+        type: nextType,
+        content: nextContent,
+        media: nextMedia ?? Prisma.JsonNull,
+        edited_at: new Date(),
+      },
+      include: {
+        sender: {
+          select: this.participantPreviewSelect,
+        },
+      },
+    });
+  }
+
+  async deleteMessage(
+    conversationId: string,
+    messageId: string,
+    userId: string,
+    dto: DeleteMessageDto,
+  ) {
+    await this.assertMembership(conversationId, userId);
+
+    const message = await this.prisma.messages.findFirst({
+      where: {
+        id: messageId,
+        conversation_id: conversationId,
+      },
+      include: {
+        sender: {
+          select: this.participantPreviewSelect,
+        },
+      },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message introuvable');
+    }
+
+    if (dto.scope === DeleteMessageScope.EVERYONE) {
+      if (message.sender_id !== userId) {
+        throw new ForbiddenException(
+          "Seul l'auteur peut supprimer pour tout le monde",
+        );
+      }
+
+      return this.prisma.messages.update({
+        where: { id: messageId },
+        data: {
+          content: 'Message supprimé',
+          media: Prisma.JsonNull,
+          edited_at: new Date(),
+          deleted_for_everyone_at: new Date(),
+          deleted_for_everyone_by: userId,
+        },
+        include: {
+          sender: {
+            select: this.participantPreviewSelect,
+          },
+        },
+      });
+    }
+
+    await this.prisma.message_deleted_for_users.upsert({
+      where: {
+        message_id_user_id: {
+          message_id: messageId,
+          user_id: userId,
+        },
+      },
+      update: {
+        deleted_at: new Date(),
+      },
+      create: {
+        message_id: messageId,
+        user_id: userId,
+      },
+    });
+
+    return {
+      success: true,
+      scope: DeleteMessageScope.ME,
+      messageId,
+    };
+  }
+
   async markConversationAsRead(conversationId: string, userId: string) {
     await this.assertMembership(conversationId, userId);
 
@@ -358,6 +520,12 @@ export class MessagerieService {
             not: userId,
           },
           status: 'DELIVERED',
+          deleted_for_everyone_at: null,
+          deleted_for_users: {
+            none: {
+              user_id: userId,
+            },
+          },
         },
         data: {
           status: 'READ',
@@ -398,7 +566,7 @@ export class MessagerieService {
     const conversation = await this.prisma.conversations.update({
       where: { id: conversationId },
       data: { title },
-      include: this.getConversationDetailInclude(),
+      include: this.getConversationDetailInclude(userId),
     });
 
     return this.formatConversationDetail(conversation, userId);
@@ -538,7 +706,7 @@ export class MessagerieService {
     }
   }
 
-  private getConversationDetailInclude() {
+  private getConversationDetailInclude(currentUserId?: string) {
     return {
       participants: {
         include: {
@@ -548,6 +716,15 @@ export class MessagerieService {
         },
       },
       messages: {
+        where: currentUserId
+          ? {
+              deleted_for_users: {
+                none: {
+                  user_id: currentUserId,
+                },
+              },
+            }
+          : undefined,
         orderBy: { created_at: 'asc' as const },
         include: {
           sender: {
@@ -556,6 +733,18 @@ export class MessagerieService {
         },
       },
     } as const;
+  }
+
+  private parseMediaFromMessage(media: Prisma.JsonValue | null) {
+    if (!Array.isArray(media)) {
+      return undefined;
+    }
+
+    const normalized = media.filter(
+      (item): item is string => typeof item === 'string',
+    );
+
+    return normalized.length > 0 ? normalized : undefined;
   }
 
   private formatConversationSummary(

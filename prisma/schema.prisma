@@ -73,6 +73,8 @@ model utilisateurs {
   demandes_creation_clubs demandes_creation_clubs[]
   stories             stories[]
   story_views         story_views[]
+  deleted_messages_for_everyone messages[] @relation("message_deleted_for_everyone_by")
+  deleted_messages_for_me message_deleted_for_users[]
 }
 
 enum message_type {
@@ -562,12 +564,31 @@ model messages {
   edited_at       DateTime?
   delivered_at    DateTime?
   read_at         DateTime?
+  deleted_for_everyone_at DateTime?
+  deleted_for_everyone_by String? @db.Uuid
 
   conversation    conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
   sender          utilisateurs   @relation("message_sender", fields: [sender_id], references: [id], onDelete: Cascade)
+  deleted_for_everyone_by_user utilisateurs? @relation("message_deleted_for_everyone_by", fields: [deleted_for_everyone_by], references: [id], onDelete: SetNull)
+  deleted_for_users message_deleted_for_users[]
 
   @@index([conversation_id, created_at])
   @@index([sender_id])
+  @@index([deleted_for_everyone_at])
+}
+
+model message_deleted_for_users {
+  id         String   @id @default(uuid()) @db.Uuid
+  message_id String   @db.Uuid
+  user_id    String   @db.Uuid
+  deleted_at DateTime @default(now())
+
+  message    messages      @relation(fields: [message_id], references: [id], onDelete: Cascade)
+  user       utilisateurs  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([message_id, user_id])
+  @@index([user_id, deleted_at])
+  @@index([message_id])
 }
 
 // ==========================================
