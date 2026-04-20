@@ -76,6 +76,14 @@ export class MessagerieController {
     return this.messagerieService.getMessages(conversationId, req.user.userId);
   }
 
+  @Delete('conversations/:id')
+  deleteConversation(@Param('id') conversationId: string, @Request() req: any) {
+    return this.messagerieService.deleteConversation(
+      conversationId,
+      req.user.userId,
+    );
+  }
+
   @Patch('conversations/:id/title')
   renameGroupConversation(
     @Param('id') conversationId: string,

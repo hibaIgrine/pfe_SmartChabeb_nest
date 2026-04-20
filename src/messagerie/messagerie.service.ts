@@ -323,6 +323,79 @@ export class MessagerieService {
     });
   }
 
+  async deleteConversation(conversationId: string, userId: string) {
+    const conversation = await this.prisma.conversations.findUnique({
+      where: { id: conversationId },
+      select: {
+        id: true,
+        type: true,
+        created_by: true,
+        participants: {
+          select: {
+            user_id: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation introuvable');
+    }
+
+    const membership = conversation.participants.find(
+      (participant) => participant.user_id === userId,
+    );
+
+    if (!membership) {
+      throw new ForbiddenException(
+        'Vous ne participez pas a cette conversation',
+      );
+    }
+
+    if (conversation.type === 'private') {
+      await this.prisma.conversations.delete({
+        where: { id: conversationId },
+      });
+
+      return {
+        deleted: true,
+        scope: 'EVERYONE',
+        conversationId,
+      };
+    }
+
+    const isCreator = conversation.created_by === userId;
+    const isAdmin = membership.role === 'ADMIN';
+
+    if (isCreator || isAdmin) {
+      await this.prisma.conversations.delete({
+        where: { id: conversationId },
+      });
+
+      return {
+        deleted: true,
+        scope: 'EVERYONE',
+        conversationId,
+      };
+    }
+
+    await this.prisma.conversation_participants.delete({
+      where: {
+        conversation_id_user_id: {
+          conversation_id: conversationId,
+          user_id: userId,
+        },
+      },
+    });
+
+    return {
+      deleted: true,
+      scope: 'ME',
+      conversationId,
+    };
+  }
+
   async sendMessage(
     conversationId: string,
     senderId: string,
