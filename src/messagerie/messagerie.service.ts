@@ -10,6 +10,7 @@ import { CreateConversationDto } from './dto/create-conversation.dto';
 import { CreateGroupConversationDto } from './dto/create-group-conversation.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { DeleteMessageDto, DeleteMessageScope } from './dto/delete-message.dto';
+import { UpdateConversationArchiveDto } from './dto/update-conversation-archive.dto';
 import { UpdateConversationMembersDto } from './dto/update-conversation-members.dto';
 import { UpdateMessagePinDto } from './dto/update-message-pin.dto';
 import { UpdateConversationTitleDto } from './dto/update-conversation-title.dto';
@@ -509,6 +510,34 @@ export class MessagerieService {
     };
   }
 
+  async updateConversationArchive(
+    conversationId: string,
+    userId: string,
+    dto: UpdateConversationArchiveDto,
+  ) {
+    await this.assertMembership(conversationId, userId);
+
+    const archivedAt = dto.is_archived ? new Date() : null;
+
+    await this.prisma.conversation_participants.update({
+      where: {
+        conversation_id_user_id: {
+          conversation_id: conversationId,
+          user_id: userId,
+        },
+      },
+      data: {
+        archived_at: archivedAt,
+      },
+    });
+
+    return {
+      conversationId,
+      is_archived: dto.is_archived,
+      archived_at: archivedAt,
+    };
+  }
+
   async sendMessage(
     conversationId: string,
     senderId: string,
@@ -986,6 +1015,7 @@ export class MessagerieService {
       last_message_at: conversation.last_message_at,
       participant_count: conversation.participants.length,
       current_user_role: currentParticipant?.role ?? null,
+      current_user_archived_at: currentParticipant?.archived_at ?? null,
       counterpart: this.mapPresenceUser(counterpart?.user),
       last_message: conversation.messages[0] ?? null,
     };
@@ -1018,9 +1048,11 @@ export class MessagerieService {
       last_message_at: conversation.last_message_at,
       participant_count: conversation.participants.length,
       current_user_role: currentParticipant?.role ?? null,
+      current_user_archived_at: currentParticipant?.archived_at ?? null,
       counterpart: this.mapPresenceUser(counterpart?.user),
       participants: conversation.participants.map((participant) => ({
         ...participant,
+        archived_at: participant.archived_at,
         user: this.mapPresenceUser(participant.user),
       })),
       messages: conversation.messages,

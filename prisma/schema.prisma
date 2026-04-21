@@ -543,6 +543,7 @@ model conversation_participants {
   user_id         String   @db.Uuid
   role            String   @default("MEMBER") @db.VarChar(20)
   joined_at       DateTime @default(now())
+  archived_at     DateTime?
   last_read_at    DateTime?
   last_typing_at  DateTime?
 
@@ -551,6 +552,7 @@ model conversation_participants {
 
   @@unique([conversation_id, user_id])
   @@index([user_id])
+  @@index([user_id, archived_at])
   @@index([conversation_id, last_typing_at])
 }
 
