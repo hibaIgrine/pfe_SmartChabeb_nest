@@ -11,6 +11,7 @@ import { CreateGroupConversationDto } from './dto/create-group-conversation.dto'
 import { CreateMessageDto } from './dto/create-message.dto';
 import { DeleteMessageDto, DeleteMessageScope } from './dto/delete-message.dto';
 import { UpdateConversationMembersDto } from './dto/update-conversation-members.dto';
+import { UpdateMessagePinDto } from './dto/update-message-pin.dto';
 import { UpdateConversationTitleDto } from './dto/update-conversation-title.dto';
 import { UpdateMessageDto } from './dto/update-message.dto';
 import { UpdateTypingDto } from './dto/update-typing.dto';
@@ -234,6 +235,9 @@ export class MessagerieService {
                 sender: {
                   select: this.participantPreviewSelect,
                 },
+                pinned_by_user: {
+                  select: this.participantPreviewSelect,
+                },
               },
             },
           },
@@ -320,8 +324,51 @@ export class MessagerieService {
           sender: {
             select: this.participantPreviewSelect,
           },
+          pinned_by_user: {
+            select: this.participantPreviewSelect,
+          },
         },
       });
+    });
+  }
+
+  async updateMessagePin(
+    conversationId: string,
+    messageId: string,
+    userId: string,
+    dto: UpdateMessagePinDto,
+  ) {
+    await this.assertMembership(conversationId, userId);
+
+    const message = await this.prisma.messages.findFirst({
+      where: {
+        id: messageId,
+        conversation_id: conversationId,
+        deleted_for_everyone_at: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message introuvable');
+    }
+
+    return this.prisma.messages.update({
+      where: { id: messageId },
+      data: {
+        pinned_at: dto.is_pinned ? new Date() : null,
+        pinned_by: dto.is_pinned ? userId : null,
+      },
+      include: {
+        sender: {
+          select: this.participantPreviewSelect,
+        },
+        pinned_by_user: {
+          select: this.participantPreviewSelect,
+        },
+      },
     });
   }
 
@@ -490,6 +537,9 @@ export class MessagerieService {
           sender: {
             select: this.participantPreviewSelect,
           },
+          pinned_by_user: {
+            select: this.participantPreviewSelect,
+          },
         },
       });
 
@@ -567,6 +617,9 @@ export class MessagerieService {
         sender: {
           select: this.participantPreviewSelect,
         },
+        pinned_by_user: {
+          select: this.participantPreviewSelect,
+        },
       },
     });
   }
@@ -608,11 +661,16 @@ export class MessagerieService {
           content: 'Message supprimé',
           media: Prisma.JsonNull,
           edited_at: new Date(),
+          pinned_at: null,
+          pinned_by: null,
           deleted_for_everyone_at: new Date(),
           deleted_for_everyone_by: userId,
         },
         include: {
           sender: {
+            select: this.participantPreviewSelect,
+          },
+          pinned_by_user: {
             select: this.participantPreviewSelect,
           },
         },
@@ -879,6 +937,9 @@ export class MessagerieService {
         orderBy: { created_at: 'asc' as const },
         include: {
           sender: {
+            select: this.participantPreviewSelect,
+          },
+          pinned_by_user: {
             select: this.participantPreviewSelect,
           },
         },

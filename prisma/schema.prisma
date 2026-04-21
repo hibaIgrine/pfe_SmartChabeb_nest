@@ -66,6 +66,7 @@ model utilisateurs {
   post_reactions      post_reactions[]
   post_mentions_received post_mentions[]   @relation("post_mentioned_user")
   messages_sent       messages[]            @relation("message_sender")
+  pinned_messages     messages[]            @relation("message_pinner")
   conversations_created conversations[]      @relation("conversation_creator")
   conversation_participations conversation_participants[]
   presences_club      presences_clubs[]      @relation("presence_membre")
@@ -566,16 +567,20 @@ model messages {
   edited_at       DateTime?
   delivered_at    DateTime?
   read_at         DateTime?
+  pinned_at       DateTime?
+  pinned_by       String? @db.Uuid
   deleted_for_everyone_at DateTime?
   deleted_for_everyone_by String? @db.Uuid
 
   conversation    conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
   sender          utilisateurs   @relation("message_sender", fields: [sender_id], references: [id], onDelete: Cascade)
+  pinned_by_user  utilisateurs?  @relation("message_pinner", fields: [pinned_by], references: [id], onDelete: SetNull)
   deleted_for_everyone_by_user utilisateurs? @relation("message_deleted_for_everyone_by", fields: [deleted_for_everyone_by], references: [id], onDelete: SetNull)
   deleted_for_users message_deleted_for_users[]
 
   @@index([conversation_id, created_at])
   @@index([sender_id])
+  @@index([pinned_at])
   @@index([deleted_for_everyone_at])
 }
 
