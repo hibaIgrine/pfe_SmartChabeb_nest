@@ -15,6 +15,7 @@ import { CreateGroupConversationDto } from './dto/create-group-conversation.dto'
 import { CreateMessageDto } from './dto/create-message.dto';
 import { DeleteMessageDto } from './dto/delete-message.dto';
 import { UpdateConversationArchiveDto } from './dto/update-conversation-archive.dto';
+import { UpdateConversationMuteDto } from './dto/update-conversation-mute.dto';
 import { UpdateConversationMembersDto } from './dto/update-conversation-members.dto';
 import { UpdateMessagePinDto } from './dto/update-message-pin.dto';
 import { UpdateConversationTitleDto } from './dto/update-conversation-title.dto';
@@ -115,6 +116,19 @@ export class MessagerieController {
     @Body() body: UpdateConversationArchiveDto,
   ) {
     return this.messagerieService.updateConversationArchive(
+      conversationId,
+      req.user.userId,
+      body,
+    );
+  }
+
+  @Patch('conversations/:id/mute')
+  updateConversationMute(
+    @Param('id') conversationId: string,
+    @Request() req: any,
+    @Body() body: UpdateConversationMuteDto,
+  ) {
+    return this.messagerieService.updateConversationMute(
       conversationId,
       req.user.userId,
       body,

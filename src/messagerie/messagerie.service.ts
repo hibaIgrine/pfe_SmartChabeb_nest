@@ -6,12 +6,14 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { MessagerieMuteService } from './messagerie-mute.service';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { CreateGroupConversationDto } from './dto/create-group-conversation.dto';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { DeleteMessageDto, DeleteMessageScope } from './dto/delete-message.dto';
 import { UpdateConversationArchiveDto } from './dto/update-conversation-archive.dto';
 import { UpdateConversationMembersDto } from './dto/update-conversation-members.dto';
+import { UpdateConversationMuteDto } from './dto/update-conversation-mute.dto';
 import { UpdateMessagePinDto } from './dto/update-message-pin.dto';
 import { UpdateConversationTitleDto } from './dto/update-conversation-title.dto';
 import { UpdateMessageDto } from './dto/update-message.dto';
@@ -40,7 +42,10 @@ export class MessagerieService {
     last_seen_at: true,
   } as const;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly messagerieMuteService: MessagerieMuteService,
+  ) {}
 
   async updateMyPresenceHeartbeat(userId: string) {
     const now = new Date();
@@ -77,6 +82,8 @@ export class MessagerieService {
   }
 
   async getUnreadMessagesCount(userId: string) {
+    const now = new Date();
+
     const count = await this.prisma.messages.count({
       where: {
         sender_id: {
@@ -89,6 +96,28 @@ export class MessagerieService {
         deleted_for_users: {
           none: {
             user_id: userId,
+          },
+        },
+        NOT: {
+          conversation: {
+            participants: {
+              some: {
+                user_id: userId,
+                muted_at: {
+                  not: null,
+                },
+                OR: [
+                  {
+                    muted_until: null,
+                  },
+                  {
+                    muted_until: {
+                      gt: now,
+                    },
+                  },
+                ],
+              },
+            },
           },
         },
         conversation: {
@@ -184,6 +213,8 @@ export class MessagerieService {
   }
 
   async getMyConversations(userId: string) {
+    await this.messagerieMuteService.cleanupExpiredMutes(userId);
+
     await this.prisma.messages.updateMany({
       where: {
         sender_id: {
@@ -269,6 +300,18 @@ export class MessagerieService {
     }
 
     return this.formatConversationDetail(conversation, userId);
+  }
+
+  async updateConversationMute(
+    conversationId: string,
+    userId: string,
+    dto: UpdateConversationMuteDto,
+  ) {
+    return this.messagerieMuteService.updateConversationMute(
+      conversationId,
+      userId,
+      dto,
+    );
   }
 
   async getMessages(conversationId: string, userId: string) {
@@ -1016,6 +1059,10 @@ export class MessagerieService {
       participant_count: conversation.participants.length,
       current_user_role: currentParticipant?.role ?? null,
       current_user_archived_at: currentParticipant?.archived_at ?? null,
+      current_user_muted_at: currentParticipant?.muted_at ?? null,
+      current_user_muted_until: currentParticipant?.muted_until ?? null,
+      current_user_is_muted:
+        this.messagerieMuteService.isMuteActive(currentParticipant),
       counterpart: this.mapPresenceUser(counterpart?.user),
       last_message: conversation.messages[0] ?? null,
     };
@@ -1049,10 +1096,16 @@ export class MessagerieService {
       participant_count: conversation.participants.length,
       current_user_role: currentParticipant?.role ?? null,
       current_user_archived_at: currentParticipant?.archived_at ?? null,
+      current_user_muted_at: currentParticipant?.muted_at ?? null,
+      current_user_muted_until: currentParticipant?.muted_until ?? null,
+      current_user_is_muted:
+        this.messagerieMuteService.isMuteActive(currentParticipant),
       counterpart: this.mapPresenceUser(counterpart?.user),
       participants: conversation.participants.map((participant) => ({
         ...participant,
         archived_at: participant.archived_at,
+        muted_at: participant.muted_at,
+        muted_until: participant.muted_until,
         user: this.mapPresenceUser(participant.user),
       })),
       messages: conversation.messages,
