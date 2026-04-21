@@ -543,12 +543,14 @@ model conversation_participants {
   role            String   @default("MEMBER") @db.VarChar(20)
   joined_at       DateTime @default(now())
   last_read_at    DateTime?
+  last_typing_at  DateTime?
 
   conversation    conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
   user            utilisateurs   @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([conversation_id, user_id])
   @@index([user_id])
+  @@index([conversation_id, last_typing_at])
 }
 
 model messages {

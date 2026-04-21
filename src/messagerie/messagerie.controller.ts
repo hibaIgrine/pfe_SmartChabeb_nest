@@ -17,6 +17,7 @@ import { DeleteMessageDto } from './dto/delete-message.dto';
 import { UpdateConversationMembersDto } from './dto/update-conversation-members.dto';
 import { UpdateConversationTitleDto } from './dto/update-conversation-title.dto';
 import { UpdateMessageDto } from './dto/update-message.dto';
+import { UpdateTypingDto } from './dto/update-typing.dto';
 import { MessagerieService } from './messagerie.service';
 
 @Controller('messagerie')
@@ -74,6 +75,27 @@ export class MessagerieController {
   @Get('conversations/:id/messages')
   getMessages(@Param('id') conversationId: string, @Request() req: any) {
     return this.messagerieService.getMessages(conversationId, req.user.userId);
+  }
+
+  @Get('conversations/:id/typing')
+  getTypingStatus(@Param('id') conversationId: string, @Request() req: any) {
+    return this.messagerieService.getTypingStatus(
+      conversationId,
+      req.user.userId,
+    );
+  }
+
+  @Patch('conversations/:id/typing')
+  updateTypingStatus(
+    @Param('id') conversationId: string,
+    @Request() req: any,
+    @Body() body: UpdateTypingDto,
+  ) {
+    return this.messagerieService.updateTypingStatus(
+      conversationId,
+      req.user.userId,
+      body,
+    );
   }
 
   @Delete('conversations/:id')

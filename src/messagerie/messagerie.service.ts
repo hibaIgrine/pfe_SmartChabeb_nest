@@ -13,6 +13,7 @@ import { DeleteMessageDto, DeleteMessageScope } from './dto/delete-message.dto';
 import { UpdateConversationMembersDto } from './dto/update-conversation-members.dto';
 import { UpdateConversationTitleDto } from './dto/update-conversation-title.dto';
 import { UpdateMessageDto } from './dto/update-message.dto';
+import { UpdateTypingDto } from './dto/update-typing.dto';
 import {
   assertPrivateMessagePayload,
   assertValidGroupTitle,
@@ -26,6 +27,7 @@ import {
 @Injectable()
 export class MessagerieService {
   private readonly onlineWindowMs = 2 * 60 * 1000;
+  private readonly typingWindowMs = 8 * 1000;
 
   private readonly participantPreviewSelect = {
     id: true,
@@ -323,6 +325,70 @@ export class MessagerieService {
     });
   }
 
+  async getTypingStatus(conversationId: string, userId: string) {
+    await this.assertMembership(conversationId, userId);
+
+    const threshold = new Date(Date.now() - this.typingWindowMs);
+
+    const typingParticipants =
+      await this.prisma.conversation_participants.findMany({
+        where: {
+          conversation_id: conversationId,
+          user_id: {
+            not: userId,
+          },
+          last_typing_at: {
+            gte: threshold,
+          },
+        },
+        include: {
+          user: {
+            select: this.participantPreviewSelect,
+          },
+        },
+        orderBy: {
+          last_typing_at: 'desc',
+        },
+      });
+
+    return {
+      conversationId,
+      users: typingParticipants
+        .map((participant) => this.mapPresenceUser(participant.user))
+        .filter((user) => user !== null),
+      updatedAt: new Date(),
+    };
+  }
+
+  async updateTypingStatus(
+    conversationId: string,
+    userId: string,
+    dto: UpdateTypingDto,
+  ) {
+    await this.assertMembership(conversationId, userId);
+
+    const now = new Date();
+    const nextTypingAt = dto.is_typing ? now : null;
+
+    await this.prisma.conversation_participants.update({
+      where: {
+        conversation_id_user_id: {
+          conversation_id: conversationId,
+          user_id: userId,
+        },
+      },
+      data: {
+        last_typing_at: nextTypingAt,
+      },
+    });
+
+    return {
+      conversationId,
+      is_typing: dto.is_typing,
+      last_typing_at: nextTypingAt,
+    };
+  }
+
   async deleteConversation(conversationId: string, userId: string) {
     const conversation = await this.prisma.conversations.findUnique({
       where: { id: conversationId },
@@ -430,6 +496,18 @@ export class MessagerieService {
       await tx.conversations.update({
         where: { id: conversationId },
         data: { last_message_at: now },
+      });
+
+      await tx.conversation_participants.update({
+        where: {
+          conversation_id_user_id: {
+            conversation_id: conversationId,
+            user_id: senderId,
+          },
+        },
+        data: {
+          last_typing_at: null,
+        },
       });
 
       return createdMessage;
