@@ -42,6 +42,21 @@ export class SocialMediaController {
     return this.socialMediaService.findPostById(id, req.user.userId);
   }
 
+  @Get('users/:id/posts')
+  findPostsByUser(
+    @Param('id') userId: string,
+    @Request() req: any,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.socialMediaService.findPostsByUser(
+      userId,
+      req.user.userId,
+      limit,
+      offset,
+    );
+  }
+
   @Patch('posts/:id')
   updatePost(
     @Param('id') id: string,

@@ -164,6 +164,7 @@ export class SocialMediaService {
   private canUserViewPost(
     post: { user_id: string; visibility: string | null },
     currentUserId?: string,
+    isFollowingAuthor = false,
   ) {
     const normalizedVisibility = this.normalizeVisibility(
       post.visibility ?? undefined,
@@ -176,7 +177,9 @@ export class SocialMediaService {
       return true;
     }
 
-    return Boolean(currentUserId && post.user_id === currentUserId);
+    return Boolean(
+      currentUserId && (post.user_id === currentUserId || isFollowingAuthor),
+    );
   }
 
   private normalizeHiddenUserIds(userIds?: string[]): string[] | undefined {
@@ -198,6 +201,15 @@ export class SocialMediaService {
     });
 
     return hiddenLinks.map((item) => item.hidden_user_id);
+  }
+
+  private async getFollowingUserIdsFor(userId: string): Promise<string[]> {
+    const followingLinks = await this.prisma.user_follows.findMany({
+      where: { follower_id: userId },
+      select: { followed_id: true },
+    });
+
+    return followingLinks.map((item) => item.followed_id);
   }
 
   private async ensurePostVisibleToUser(postId: string, currentUserId: string) {
@@ -222,7 +234,16 @@ export class SocialMediaService {
       throw new NotFoundException('Publication introuvable');
     }
 
-    if (!this.canUserViewPost(post, currentUserId)) {
+    const isFollowingAuthor =
+      post.user_id !== currentUserId &&
+      (await this.prisma.user_follows.count({
+        where: {
+          follower_id: currentUserId,
+          followed_id: post.user_id,
+        },
+      })) > 0;
+
+    if (!this.canUserViewPost(post, currentUserId, isFollowingAuthor)) {
       throw new ForbiddenException('Cette publication est privee');
     }
 
@@ -533,29 +554,44 @@ export class SocialMediaService {
     const hiddenUserIds = currentUserId
       ? await this.getHiddenUserIdsFor(currentUserId)
       : [];
+    const followingUserIds = currentUserId
+      ? await this.getFollowingUserIdsFor(currentUserId)
+      : [];
+
+    const visibilityFilters = currentUserId
+      ? [
+          { visibility: 'PUBLIC' },
+          { user_id: currentUserId },
+          ...(followingUserIds.length
+            ? [
+                {
+                  AND: [
+                    { visibility: 'PRIVATE' },
+                    { user_id: { in: followingUserIds } },
+                  ],
+                },
+              ]
+            : []),
+          {
+            AND: [
+              { visibility: 'MASKED' },
+              {
+                hidden_users: {
+                  none: {
+                    hidden_user_id: currentUserId,
+                  },
+                },
+              },
+            ],
+          },
+        ]
+      : [{ visibility: 'PUBLIC' }];
 
     const posts = await this.prisma.posts.findMany({
       where: {
         AND: [
           {
-            OR: currentUserId
-              ? [
-                  { visibility: 'PUBLIC' },
-                  { user_id: currentUserId },
-                  {
-                    AND: [
-                      { visibility: 'MASKED' },
-                      {
-                        hidden_users: {
-                          none: {
-                            hidden_user_id: currentUserId,
-                          },
-                        },
-                      },
-                    ],
-                  },
-                ]
-              : [{ visibility: 'PUBLIC' }],
+            OR: visibilityFilters,
           },
           hiddenUserIds.length ? { user_id: { notIn: hiddenUserIds } } : {},
         ],
@@ -616,6 +652,91 @@ export class SocialMediaService {
     );
 
     return postWithFavorite;
+  }
+
+  async findPostsByUser(
+    targetUserId: string,
+    currentUserId: string,
+    limit?: string,
+    offset?: string,
+  ) {
+    const parsedLimit = Number.parseInt(limit ?? '20', 10);
+    const parsedOffset = Number.parseInt(offset ?? '0', 10);
+
+    const safeLimit = Number.isNaN(parsedLimit)
+      ? 20
+      : Math.min(parsedLimit, 100);
+    const safeOffset = Number.isNaN(parsedOffset)
+      ? 0
+      : Math.max(parsedOffset, 0);
+
+    const userExists = await this.prisma.utilisateurs.findUnique({
+      where: { id: targetUserId },
+      select: { id: true },
+    });
+
+    if (!userExists) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    const hiddenUserIds = await this.getHiddenUserIdsFor(currentUserId);
+    if (
+      targetUserId !== currentUserId &&
+      hiddenUserIds.includes(targetUserId)
+    ) {
+      throw new ForbiddenException('Cette personne est masquee');
+    }
+
+    const isFollowingAuthor =
+      targetUserId !== currentUserId &&
+      (await this.prisma.user_follows.count({
+        where: {
+          follower_id: currentUserId,
+          followed_id: targetUserId,
+        },
+      })) > 0;
+
+    const visibilityFilter =
+      targetUserId === currentUserId
+        ? {}
+        : {
+            OR: [
+              { visibility: 'PUBLIC' },
+              ...(isFollowingAuthor ? [{ visibility: 'PRIVATE' }] : []),
+              {
+                AND: [
+                  { visibility: 'MASKED' },
+                  {
+                    hidden_users: {
+                      none: {
+                        hidden_user_id: currentUserId,
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          };
+
+    const posts = await this.prisma.posts.findMany({
+      where: {
+        user_id: targetUserId,
+        ...visibilityFilter,
+      },
+      orderBy: { created_at: 'desc' },
+      take: safeLimit,
+      skip: safeOffset,
+      include: this.postInclude,
+    });
+
+    const postsWithReactions = await Promise.all(
+      posts.map(async (post) => ({
+        ...post,
+        reactions: await this.getReactions(post.id, currentUserId),
+      })),
+    );
+
+    return this.withFavoriteMetaList(postsWithReactions, currentUserId);
   }
 
   async updatePost(postId: string, userId: string, dto: UpdatePostDto) {
@@ -921,6 +1042,34 @@ export class SocialMediaService {
       : Math.max(parsedOffset, 0);
 
     const hiddenUserIds = await this.getHiddenUserIdsFor(userId);
+    const followingUserIds = await this.getFollowingUserIdsFor(userId);
+
+    const visibilityFilters = [
+      { visibility: 'PUBLIC' },
+      { user_id: userId },
+      ...(followingUserIds.length
+        ? [
+            {
+              AND: [
+                { visibility: 'PRIVATE' },
+                { user_id: { in: followingUserIds } },
+              ],
+            },
+          ]
+        : []),
+      {
+        AND: [
+          { visibility: 'MASKED' },
+          {
+            hidden_users: {
+              none: {
+                hidden_user_id: userId,
+              },
+            },
+          },
+        ],
+      },
+    ];
 
     const favoriteLinks = await this.prisma.post_favorites.findMany({
       where: {
@@ -928,22 +1077,7 @@ export class SocialMediaService {
         post: {
           AND: [
             {
-              OR: [
-                { visibility: 'PUBLIC' },
-                { user_id: userId },
-                {
-                  AND: [
-                    { visibility: 'MASKED' },
-                    {
-                      hidden_users: {
-                        none: {
-                          hidden_user_id: userId,
-                        },
-                      },
-                    },
-                  ],
-                },
-              ],
+              OR: visibilityFilters,
             },
             hiddenUserIds.length ? { user_id: { notIn: hiddenUserIds } } : {},
           ],
@@ -998,7 +1132,16 @@ export class SocialMediaService {
       throw new NotFoundException('Publication introuvable');
     }
 
-    if (!this.canUserViewPost(post, userId)) {
+    const isFollowingAuthor =
+      post.user_id !== userId &&
+      (await this.prisma.user_follows.count({
+        where: {
+          follower_id: userId,
+          followed_id: post.user_id,
+        },
+      })) > 0;
+
+    if (!this.canUserViewPost(post, userId, isFollowingAuthor)) {
       throw new ForbiddenException('Cette publication est privee');
     }
 

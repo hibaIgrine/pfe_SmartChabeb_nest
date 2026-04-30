@@ -41,6 +41,13 @@ export class ResetPasswordDto {
   newPassword!: string;
 }
 
+export class GoogleLoginDto {
+  @ApiProperty({ example: 'eyJhbGciOiJSUzI1NiIsImtpZCI6IjExIn0...' })
+  @IsString()
+  @IsNotEmpty({ message: 'Le token Google est obligatoire' })
+  token!: string;
+}
+
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
@@ -51,6 +58,18 @@ export class AuthController {
   async login(@Body() loginDto: LoginDto) {
     // On utilise les données validées du DTO
     return this.authService.login(loginDto.email, loginDto.mot_de_passe);
+  }
+
+  // Envoie un code de vérification par email
+  @Post('send-verification-code')
+  async sendVerificationCode(@Body() body: { email: string }) {
+    return this.authService.sendVerificationCode(body.email);
+  }
+
+  // Vérifie le code de vérification
+  @Post('verify-code')
+  async verifyCode(@Body() body: { email: string; code: string }) {
+    return this.authService.verifyEmailCode(body.email, body.code);
   }
 
   // Lance la procedure d'oubli de mot de passe et envoie un code par email.
@@ -67,5 +86,11 @@ export class AuthController {
       resetPasswordDto.token,
       resetPasswordDto.newPassword,
     );
+  }
+
+  // Connecte ou crée un utilisateur via Google Sign-In.
+  @Post('google-login')
+  async googleLogin(@Body() googleLoginDto: GoogleLoginDto) {
+    return this.authService.googleLogin(googleLoginDto.token);
   }
 }

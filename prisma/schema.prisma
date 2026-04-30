@@ -23,7 +23,7 @@ model utilisateurs {
   nom                 String                @db.VarChar(100)
   prenom              String                @db.VarChar(100)
   email               String                @unique @db.VarChar(255)
-  mot_de_passe        String                @db.VarChar(255)
+  mot_de_passe        String?               @db.VarChar(255)
   role                String                @db.VarChar(50)
   genre               String?               @db.VarChar(10)
   date_naissance      DateTime?             @db.Date
@@ -59,6 +59,8 @@ model utilisateurs {
   notifications       notifications[]
   posts               posts[]
   post_favorites      post_favorites[]
+  following_users     user_follows[]        @relation("user_following")
+  follower_users      user_follows[]        @relation("user_followers")
   hidden_users        user_hidden_users[]    @relation("user_hidden_author")
   hidden_by_users     user_hidden_users[]    @relation("user_hidden_target")
   hidden_from_posts   post_hidden_users[]    @relation("post_hidden_target")
@@ -431,6 +433,20 @@ model post_hidden_users {
   @@unique([post_id, hidden_user_id])
   @@index([post_id])
   @@index([hidden_user_id])
+}
+
+model user_follows {
+  id          String   @id @default(uuid()) @db.Uuid
+  follower_id String   @db.Uuid
+  followed_id String   @db.Uuid
+  created_at  DateTime @default(now())
+
+  follower    utilisateurs @relation("user_following", fields: [follower_id], references: [id], onDelete: Cascade)
+  followed    utilisateurs @relation("user_followers", fields: [followed_id], references: [id], onDelete: Cascade)
+
+  @@unique([follower_id, followed_id])
+  @@index([follower_id, created_at])
+  @@index([followed_id, created_at])
 }
 
 model user_hidden_users {

@@ -39,6 +39,11 @@ export class UsersController {
     return this.usersService.create(createUserDto);
   }
 
+  @Post('check-email')
+  async checkEmail(@Body() body: { email: string }) {
+    return this.usersService.checkEmailAvailable(body.email);
+  }
+
   @Post('verify')
   async verify(@Body() verifyUserDto: VerifyUserDto) {
     return await this.usersService.verifyEmail(
@@ -69,6 +74,30 @@ export class UsersController {
   @UseGuards(AuthGuard('jwt'))
   async getMyGamification(@Request() req: any) {
     return await this.usersService.getGamificationProfile(req.user.userId);
+  }
+
+  @Get('me/following')
+  @UseGuards(AuthGuard('jwt'))
+  async getMyFollowing(@Request() req: any) {
+    return await this.usersService.findFollowingUsers(req.user.userId);
+  }
+
+  @Get(':id/public-profile')
+  @UseGuards(AuthGuard('jwt'))
+  async getPublicProfile(@Param('id') id: string, @Request() req: any) {
+    return await this.usersService.findPublicProfile(id, req.user.userId);
+  }
+
+  @Post(':id/follow')
+  @UseGuards(AuthGuard('jwt'))
+  async followUser(@Param('id') id: string, @Request() req: any) {
+    return await this.usersService.followUser(req.user.userId, id);
+  }
+
+  @Delete(':id/follow')
+  @UseGuards(AuthGuard('jwt'))
+  async unfollowUser(@Param('id') id: string, @Request() req: any) {
+    return await this.usersService.unfollowUser(req.user.userId, id);
   }
 
   @Get('gamification/leaderboard')

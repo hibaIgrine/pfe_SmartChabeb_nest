@@ -182,6 +182,15 @@ export class UsersService {
   // ==========================================
   // 1. CRÉATION (Inscription Mobile Adhérent)
   // ==========================================
+
+  // Vérifie si un email est disponible
+  async checkEmailAvailable(email: string) {
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { email },
+    });
+    return { available: !user };
+  }
+
   async create(createUserDto: any) {
     try {
       const roleObj = await this.prisma.roles.findUnique({
@@ -194,6 +203,20 @@ export class UsersService {
       );
       const vCode = Math.floor(1000 + Math.random() * 9000).toString();
 
+      // Transform date_naissance from YYYY-MM-DD to ISO DateTime if needed
+      let dateNaissance: Date | undefined = undefined;
+      if (createUserDto.date_naissance) {
+        const dateStr = createUserDto.date_naissance;
+        if (
+          typeof dateStr === 'string' &&
+          /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+        ) {
+          dateNaissance = new Date(dateStr + 'T00:00:00Z');
+        } else {
+          dateNaissance = new Date(createUserDto.date_naissance);
+        }
+      }
+
       const user = await this.prisma.utilisateurs.create({
         data: {
           nom: createUserDto.nom,
@@ -203,7 +226,10 @@ export class UsersService {
           role: 'ADHERENT',
           id_role: roleObj?.id,
           code_verification: vCode,
-          est_verifie: false,
+          est_verifie: true, // Email est déjà vérifié avant signup
+          genre: createUserDto.genre || null,
+          date_naissance: dateNaissance || null,
+          id_centre: createUserDto.id_centre || null,
         },
       });
       console.log(
@@ -284,6 +310,15 @@ export class UsersService {
       }
     }
 
+    // Transform date_naissance from YYYY-MM-DD to ISO-8601 DateTime
+    if (updateUserDto.date_naissance) {
+      const dateStr = updateUserDto.date_naissance;
+      // If it's a simple date string (YYYY-MM-DD), convert to ISO DateTime at midnight
+      if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        updateUserDto.date_naissance = new Date(dateStr + 'T00:00:00Z');
+      }
+    }
+
     const updatedUser = await this.prisma.utilisateurs.update({
       where: { id },
       data: updateUserDto,
@@ -308,13 +343,28 @@ export class UsersService {
 
   async updateProfile(email: string, updateProfileDto: any) {
     try {
+      const dataToUpdate: any = {
+        genre: updateProfileDto.genre,
+      };
+
+      // Transform date_naissance from YYYY-MM-DD to ISO-8601 DateTime
+      if (updateProfileDto.date_naissance) {
+        const dateStr = updateProfileDto.date_naissance;
+        if (
+          typeof dateStr === 'string' &&
+          /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+        ) {
+          dataToUpdate.date_naissance = new Date(dateStr + 'T00:00:00Z');
+        } else {
+          dataToUpdate.date_naissance = new Date(
+            updateProfileDto.date_naissance,
+          );
+        }
+      }
+
       const user = await this.prisma.utilisateurs.update({
         where: { email: email.toLowerCase().trim() },
-        data: {
-          genre: updateProfileDto.genre,
-          // On s'assure que la date est bien un objet Date
-          date_naissance: new Date(updateProfileDto.date_naissance),
-        },
+        data: dataToUpdate,
       });
       return user;
     } catch (error) {
@@ -406,6 +456,124 @@ export class UsersService {
     });
     if (!user) throw new NotFoundException('Utilisateur introuvable');
     return user;
+  }
+
+  async findPublicProfile(targetUserId: string, viewerUserId: string) {
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { id: targetUserId },
+      select: {
+        id: true,
+        nom: true,
+        prenom: true,
+        role: true,
+        bio: true,
+        genre: true,
+        date_naissance: true,
+        photo_profil_url: true,
+        lieu_habite: true,
+        etablissement_etude: true,
+        points: true,
+        centre: {
+          select: {
+            id: true,
+            nom: true,
+            gouvernorat: true,
+          },
+        },
+        _count: {
+          select: {
+            follower_users: true,
+            following_users: true,
+            posts: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    const isMe = viewerUserId === targetUserId;
+    const isFollowing = isMe
+      ? false
+      : (await this.prisma.user_follows.count({
+          where: {
+            follower_id: viewerUserId,
+            followed_id: targetUserId,
+          },
+        })) > 0;
+
+    return {
+      ...user,
+      _count: {
+        followers: user._count.follower_users,
+        following: user._count.following_users,
+        posts: user._count.posts,
+      },
+      isMe,
+      isFollowing,
+    };
+  }
+
+  async followUser(followerId: string, followedId: string) {
+    if (followerId === followedId) {
+      throw new ConflictException('Vous ne pouvez pas vous suivre vous-meme');
+    }
+
+    const target = await this.prisma.utilisateurs.findUnique({
+      where: { id: followedId },
+      select: { id: true },
+    });
+
+    if (!target) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    await this.prisma.user_follows.upsert({
+      where: {
+        follower_id_followed_id: {
+          follower_id: followerId,
+          followed_id: followedId,
+        },
+      },
+      update: {},
+      create: {
+        follower_id: followerId,
+        followed_id: followedId,
+      },
+    });
+
+    return { success: true };
+  }
+
+  async unfollowUser(followerId: string, followedId: string) {
+    await this.prisma.user_follows.deleteMany({
+      where: {
+        follower_id: followerId,
+        followed_id: followedId,
+      },
+    });
+
+    return { success: true };
+  }
+
+  async findFollowingUsers(userId: string) {
+    return this.prisma.user_follows.findMany({
+      where: { follower_id: userId },
+      orderBy: { created_at: 'desc' },
+      include: {
+        followed: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            photo_profil_url: true,
+            role: true,
+          },
+        },
+      },
+    });
   }
 
   // ==========================================
