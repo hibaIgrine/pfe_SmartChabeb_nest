@@ -32,6 +32,18 @@ export class ClubsController {
     return await this.clubsService.findMyClubs(req.user.userId);
   }
 
+  @Get('my-centre')
+  @UseGuards(AuthGuard('jwt'))
+  async getMyCentreClubs(@Request() req) {
+    return await this.clubsService.findClubsForUserCentre(req.user.userId);
+  }
+
+  @Get('my-centre/:id')
+  @UseGuards(AuthGuard('jwt'))
+  async getMyCentreClubDetails(@Param('id') id: string, @Request() req) {
+    return await this.clubsService.findClubForUserCentre(req.user.userId, id);
+  }
+
   // 💡 2. Les routes générales
   @Get()
   findAll(@Query('id_salle') id_salle?: string) {

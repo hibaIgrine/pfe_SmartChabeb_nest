@@ -272,6 +272,197 @@ export class ClubsService {
     }));
   }
 
+  async findClubsForUserCentre(userId: string) {
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { id: userId },
+      select: {
+        id_centre: true,
+        centre: {
+          select: {
+            id: true,
+            nom: true,
+            gouvernorat: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    if (!user.id_centre) {
+      return { centre: null, clubs: [] };
+    }
+
+    const clubs = await this.prisma.clubs.findMany({
+      where: {
+        id_centre: user.id_centre,
+        est_actif: true,
+      },
+      include: {
+        centre: {
+          select: {
+            id: true,
+            nom: true,
+            gouvernorat: true,
+          },
+        },
+        responsable: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            photo_profil_url: true,
+          },
+        },
+        staff: {
+          where: { is_active: true },
+          include: {
+            utilisateur: {
+              select: {
+                id: true,
+                nom: true,
+                prenom: true,
+                photo_profil_url: true,
+              },
+            },
+          },
+        },
+        inscriptions: {
+          where: { id_utilisateur: userId },
+          select: {
+            id: true,
+            statut: true,
+            date_adhesion: true,
+            est_suspendu: true,
+          },
+        },
+        _count: {
+          select: {
+            inscriptions: {
+              where: { statut: 'ACCEPTE' },
+            },
+          },
+        },
+      },
+      orderBy: { nom: 'asc' },
+    });
+
+    return {
+      centre: user.centre,
+      clubs: clubs.map((club) => ({
+        ...club,
+        my_inscription: club.inscriptions[0] ?? null,
+        start_status: this.buildStartStatus({
+          planning: club.planning,
+          accepted_participants: club._count.inscriptions,
+        }),
+      })),
+    };
+  }
+
+  async findClubForUserCentre(userId: string, clubId: string) {
+    if (!clubId || !/^[0-9a-fA-F-]{36}$/.test(clubId)) {
+      throw new BadRequestException('Identifiant de club invalide');
+    }
+
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { id: userId },
+      select: {
+        id_centre: true,
+        centre: {
+          select: {
+            id: true,
+            nom: true,
+            gouvernorat: true,
+            adresse: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    if (!user.id_centre) {
+      throw new BadRequestException('Aucun centre associe a votre compte');
+    }
+
+    const club = await this.prisma.clubs.findFirst({
+      where: {
+        id: clubId,
+        id_centre: user.id_centre,
+        est_actif: true,
+      },
+      include: {
+        centre: {
+          select: {
+            id: true,
+            nom: true,
+            gouvernorat: true,
+            adresse: true,
+          },
+        },
+        responsable: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            photo_profil_url: true,
+          },
+        },
+        staff: {
+          where: { is_active: true },
+          include: {
+            utilisateur: {
+              select: {
+                id: true,
+                nom: true,
+                prenom: true,
+                role: true,
+                photo_profil_url: true,
+              },
+            },
+          },
+        },
+        inscriptions: {
+          where: { id_utilisateur: userId },
+          select: {
+            id: true,
+            statut: true,
+            date_adhesion: true,
+            est_suspendu: true,
+          },
+        },
+        _count: {
+          select: {
+            inscriptions: {
+              where: { statut: 'ACCEPTE' },
+            },
+          },
+        },
+      },
+    });
+
+    if (!club) {
+      throw new NotFoundException('Club introuvable dans votre centre');
+    }
+
+    return {
+      centre: user.centre,
+      club: {
+        ...club,
+        my_inscription: club.inscriptions[0] ?? null,
+        start_status: this.buildStartStatus({
+          planning: club.planning,
+          accepted_participants: club._count.inscriptions,
+        }),
+      },
+    };
+  }
+
   async findOne(id: string) {
     if (!id || !/^[0-9a-fA-F-]{36}$/.test(id)) {
       throw new BadRequestException('Identifiant de club invalide');
@@ -598,6 +789,7 @@ export class ClubsService {
       const club = await tx.clubs.findUnique({
         where: { id: clubId },
         select: {
+          id_centre: true,
           capacite: true,
           _count: {
             select: { inscriptions: { where: { statut: 'ACCEPTE' } } },
@@ -606,6 +798,17 @@ export class ClubsService {
       });
 
       if (!club) throw new NotFoundException('Club introuvable');
+
+      const user = await tx.utilisateurs.findUnique({
+        where: { id: userId },
+        select: { id_centre: true },
+      });
+
+      if (!user?.id_centre || user.id_centre !== club.id_centre) {
+        throw new BadRequestException(
+          'Vous ne pouvez rejoindre que les clubs de votre centre.',
+        );
+      }
 
       const existingRequest = await tx.inscriptions_clubs.findUnique({
         where: {
