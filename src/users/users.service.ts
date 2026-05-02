@@ -201,7 +201,7 @@ export class UsersService {
         createUserDto.mot_de_passe,
         salt,
       );
-      const vCode = Math.floor(1000 + Math.random() * 9000).toString();
+      const vCode = Math.floor(100000 + Math.random() * 900000).toString();
 
       // Transform date_naissance from YYYY-MM-DD to ISO DateTime if needed
       let dateNaissance: Date | undefined = undefined;
@@ -217,8 +217,19 @@ export class UsersService {
         }
       }
 
-      const user = await this.prisma.utilisateurs.create({
-        data: {
+      // Use upsert: if user already exists (created during email verification), update with profile info
+      // Otherwise, create new user
+      const user = await this.prisma.utilisateurs.upsert({
+        where: { email: createUserDto.email.trim().toLowerCase() },
+        update: {
+          nom: createUserDto.nom,
+          prenom: createUserDto.prenom,
+          mot_de_passe: hashedPassword,
+          genre: createUserDto.genre || null,
+          date_naissance: dateNaissance || null,
+          id_centre: createUserDto.id_centre || null,
+        },
+        create: {
           nom: createUserDto.nom,
           prenom: createUserDto.prenom,
           email: createUserDto.email.trim().toLowerCase(),

@@ -5,6 +5,6 @@ export class VerifyUserDto {
   email: string;
 
   @IsString()
-  @Length(4, 4, { message: 'Le code doit contenir 4 chiffres' })
+  @Length(6, 6, { message: 'Le code doit contenir 6 chiffres' })
   code: string;
 }

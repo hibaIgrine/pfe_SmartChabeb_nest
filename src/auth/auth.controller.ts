@@ -62,8 +62,16 @@ export class AuthController {
 
   // Envoie un code de vérification par email
   @Post('send-verification-code')
-  async sendVerificationCode(@Body() body: { email: string }) {
-    return this.authService.sendVerificationCode(body.email);
+  async sendVerificationCode(
+    @Body()
+    body: {
+      email: string;
+      nom?: string;
+      prenom?: string;
+      mot_de_passe?: string;
+    },
+  ) {
+    return this.authService.sendVerificationCode(body);
   }
 
   // Vérifie le code de vérification

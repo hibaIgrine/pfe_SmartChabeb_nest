@@ -76,10 +76,50 @@ export class AuthService {
   }
 
   // Envoie un code de verification par email (pour signup)
-  async sendVerificationCode(email: string) {
+  async sendVerificationCode(payload: {
+    email: string;
+    nom?: string;
+    prenom?: string;
+    mot_de_passe?: string;
+  }) {
+    const { email, nom, prenom, mot_de_passe } = payload;
     const verificationCode = Math.floor(
       100000 + Math.random() * 900000,
     ).toString();
+
+    // If signup provided a password/name, create or update the user record now
+    try {
+      const updateData: any = {
+        code_verification: verificationCode,
+        est_verifie: false,
+      };
+
+      if (nom !== undefined) updateData.nom = nom;
+      if (prenom !== undefined) updateData.prenom = prenom;
+
+      if (mot_de_passe) {
+        const hashed = await bcrypt.hash(mot_de_passe, await bcrypt.genSalt());
+        updateData.mot_de_passe = hashed;
+      }
+
+      // Upsert user: create minimal user if not exists, otherwise update code and provided fields
+      await this.prisma.utilisateurs.upsert({
+        where: { email },
+        update: updateData,
+        create: {
+          email,
+          nom: nom || '',
+          prenom: prenom || '',
+          role: 'ADHERENT',
+          compte_actif: true,
+          est_verifie: false,
+          code_verification: verificationCode,
+          mot_de_passe: updateData.mot_de_passe || null,
+        },
+      });
+    } catch (e) {
+      console.error('Erreur création/upsert utilisateur (pre-signup):', e);
+    }
 
     // Send code via email (on ne crée pas de user encore, juste on envoie le code)
     this.mailerService
@@ -99,14 +139,16 @@ export class AuthService {
       })
       .catch((e) => console.error('Erreur envoi code verification:', e));
 
+    // Always print the generated code to the server terminal for debugging
+    console.log(`\n=== OTP Code for ${email}: ${verificationCode} ===\n`);
+
     // Store in a temporary store or session - for demo we'll just return the code in dev
     // In production, you'd want to use Redis or similar to store verification codes
     // For now, we'll store it with a user record temporarily (or send it back for demo)
     return {
       message: 'Code de vérification envoyé par email',
       // In production, remove this - it's just for testing
-      _code:
-        process.env.NODE_ENV === 'development' ? verificationCode : undefined,
+      _code: verificationCode,
     };
   }
 
@@ -211,6 +253,7 @@ export class AuthService {
     let user = await this.prisma.utilisateurs.findUnique({
       where: { email: googlePayload.email },
     });
+    const isNewUser = !user;
 
     // 3. Créer l'utilisateur s'il n'existe pas (Sign Up automatique)
     if (!user) {
@@ -219,7 +262,7 @@ export class AuthService {
           email: googlePayload.email,
           nom: googlePayload.name || 'Google User',
           prenom: '',
-          role: 'ADHERANT',
+          role: 'ADHERENT',
           compte_actif: true,
           est_verifie: true, // Google = toujours vérifié
           photo_profil_url: googlePayload.picture || null,
@@ -252,9 +295,23 @@ export class AuthService {
 
     // 5. Générer JWT (identique au login classique)
     const payload = { sub: user.id, email: user.email, role: user.role };
+    const needsProfile =
+      !user.prenom || !user.genre || !user.date_naissance || !user.id_centre;
+
     return {
       access_token: await this.jwtService.signAsync(payload),
-      user: { id: user.id, nom: user.nom, role: user.role },
+      user: {
+        id: user.id,
+        nom: user.nom,
+        prenom: user.prenom,
+        role: user.role,
+        genre: user.genre,
+        date_naissance: user.date_naissance,
+        id_centre: user.id_centre,
+        photo_profil_url: user.photo_profil_url,
+      },
+      is_new_user: isNewUser,
+      needs_profile: needsProfile,
     };
   }
 }
