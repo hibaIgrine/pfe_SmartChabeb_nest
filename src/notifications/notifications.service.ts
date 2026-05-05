@@ -26,8 +26,8 @@ type EventParticipationDecisionPayload = {
   utilisateurId: string;
   eventId: string;
   eventNom: string;
-  clubId: string;
-  clubNom: string;
+  clubId?: string | null;
+  clubNom?: string | null;
   dateEvent: Date;
   startTime: Date;
   endTime: Date;
@@ -39,8 +39,8 @@ type EventUpdatePayload = {
   utilisateurId: string;
   eventId: string;
   eventNom: string;
-  clubId: string;
-  clubNom: string;
+  clubId?: string | null;
+  clubNom?: string | null;
   localNom: string;
   dateEvent: Date;
   startTime: Date;
@@ -56,8 +56,8 @@ type EventCancellationPayload = {
   utilisateurId: string;
   eventId: string;
   eventNom: string;
-  clubId: string;
-  clubNom: string;
+  clubId?: string | null;
+  clubNom?: string | null;
   localNom: string;
   dateEvent: Date;
   startTime: Date;
@@ -351,18 +351,19 @@ export class NotificationsService {
       const dateLabel = this.formatDate(event.date_event);
       const startLabel = this.formatTime(event.start_time);
       const endLabel = this.formatTime(event.end_time);
+      const clubLabel = event.club?.nom ? ` (${event.club.nom})` : '';
 
       await this.prisma.notifications.create({
         data: {
           id_utilisateur: utilisateurId,
           type: 'EVENT_REMINDER',
           titre: 'Rappel evenement',
-          message: `Rappel: votre evenement ${event.nom} (${event.club.nom}) commence le ${dateLabel} de ${startLabel} a ${endLabel}.`,
+          message: `Rappel: votre evenement ${event.nom}${clubLabel} commence le ${dateLabel} de ${startLabel} a ${endLabel}.`,
           data: {
             eventId: event.id,
             eventNom: event.nom,
-            clubId: event.club.id,
-            clubNom: event.club.nom,
+            clubId: event.club?.id,
+            clubNom: event.club?.nom,
             localId: event.local.id,
             localNom: event.local.nom,
             dateEvent: event.date_event.toISOString(),

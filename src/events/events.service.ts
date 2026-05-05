@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, utilisateurs } from '@prisma/client';
 import { NotificationsService } from 'src/notifications/notifications.service';
+import { ReservationsService } from 'src/reservations/reservations.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { CreateEventFeedbackDto } from './dto/create-event-feedback.dto';
@@ -16,6 +17,7 @@ export class EventsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly reservationsService: ReservationsService,
   ) {}
 
   private readonly pointsPerParticipation = 10;
@@ -310,10 +312,113 @@ export class EventsService {
     return { local, club };
   }
 
+  private async resolveLocal(locauxId: string) {
+    const local = await this.prisma.locaux.findUnique({
+      where: { id: locauxId },
+      select: { id: true, id_centre: true, nom: true },
+    });
+
+    if (!local) {
+      throw new NotFoundException('Local introuvable');
+    }
+
+    return local;
+  }
+
+  private normalizeClubSelection(clubId?: string | null, clubIds?: string[]) {
+    const uniqueIds = Array.from(
+      new Set([clubId, ...(clubIds ?? [])].filter(Boolean) as string[]),
+    );
+
+    return {
+      primaryClubId: uniqueIds[0] ?? null,
+      collaboratingClubIds: uniqueIds.slice(1),
+    };
+  }
+
+  private async getManagedClubIds(userId: string) {
+    const clubs = await this.prisma.clubs.findMany({
+      where: { id_coach: userId, est_actif: true },
+      select: { id: true },
+    });
+
+    return clubs.map((club) => club.id);
+  }
+
+  private async resolveClubsForEvent(
+    localCentreId: string,
+    primaryClubId: string | null,
+    collaboratingClubIds: string[],
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    const allClubIds = Array.from(
+      new Set(
+        [primaryClubId, ...collaboratingClubIds].filter(Boolean) as string[],
+      ),
+    );
+
+    if (allClubIds.length === 0) {
+      if (requesterRole === 'RESPONSABLE_CLUB') {
+        throw new ForbiddenException(
+          'Un responsable club doit associer au moins un club a l evenement',
+        );
+      }
+
+      return { primaryClub: null, collaboratingClubIds: [] as string[] };
+    }
+
+    const clubs = await this.prisma.clubs.findMany({
+      where: { id: { in: allClubIds } },
+      select: {
+        id: true,
+        id_centre: true,
+        id_coach: true,
+        nom: true,
+        est_actif: true,
+      },
+    });
+
+    if (clubs.length !== allClubIds.length) {
+      throw new NotFoundException('Un ou plusieurs clubs sont introuvables');
+    }
+
+    if (clubs.some((club) => !club.est_actif)) {
+      throw new BadRequestException('Un ou plusieurs clubs sont inactifs');
+    }
+
+    if (clubs.some((club) => club.id_centre !== localCentreId)) {
+      throw new BadRequestException(
+        'Tous les clubs associes doivent appartenir au meme centre que le local',
+      );
+    }
+
+    if (requesterRole === 'RESPONSABLE_CLUB') {
+      const managedClubIds = await this.getManagedClubIds(requesterId);
+      const canManageOneClub = allClubIds.some((clubId) =>
+        managedClubIds.includes(clubId),
+      );
+
+      if (!canManageOneClub) {
+        throw new ForbiddenException(
+          'Vous ne pouvez gerer que les evenements liees a vos clubs',
+        );
+      }
+    }
+
+    const primaryClub =
+      clubs.find((club) => club.id === primaryClubId) ?? clubs[0];
+    const collaboratingIds = allClubIds.filter(
+      (clubId) => clubId !== primaryClub.id,
+    );
+
+    return { primaryClub, collaboratingClubIds: collaboratingIds };
+  }
+
   private assertCanManageEvent(
     requester: Pick<utilisateurs, 'id' | 'role' | 'id_centre'>,
     localCentreId: string,
-    club: { id_coach: string | null; id_centre: string },
+    club: { id_coach: string | null; id_centre: string } | null,
   ) {
     if (requester.role === 'ADMIN') {
       return;
@@ -329,6 +434,11 @@ export class EventsService {
     }
 
     if (requester.role === 'RESPONSABLE_CLUB') {
+      if (!club) {
+        throw new ForbiddenException(
+          'Un responsable club doit associer au moins un club a l evenement',
+        );
+      }
       if (club.id_coach !== requester.id) {
         throw new ForbiddenException(
           'Vous ne pouvez gerer que les evenements de vos clubs',
@@ -452,9 +562,18 @@ export class EventsService {
     }
 
     if (requester.role === 'RESPONSABLE_CLUB') {
+      const managedClubIds = await this.getManagedClubIds(requester.id);
+
       return {
         ...(includeInactive ? {} : { is_active: true }),
-        club: { id_coach: requester.id },
+        OR: [
+          { club: { id_coach: requester.id } },
+          {
+            collaborating_club_ids: {
+              hasSome: managedClubIds,
+            },
+          },
+        ],
       };
     }
 
@@ -463,14 +582,30 @@ export class EventsService {
 
   async create(userId: string, dto: CreateEventDto) {
     const requester = await this.resolveRequester(userId);
-    const { local, club } = await this.resolveLocalAndClub(
-      dto.locaux_id,
+    const local = await this.resolveLocal(dto.locaux_id);
+    const { primaryClubId, collaboratingClubIds } = this.normalizeClubSelection(
       dto.club_id,
+      dto.club_ids,
     );
-    this.assertCanManageEvent(requester, local.id_centre, {
-      id_coach: club.id_coach,
-      id_centre: club.id_centre,
-    });
+    const { primaryClub, collaboratingClubIds: resolvedCollaborators } =
+      await this.resolveClubsForEvent(
+        local.id_centre,
+        primaryClubId,
+        collaboratingClubIds,
+        requester.id,
+        requester.role,
+      );
+
+    this.assertCanManageEvent(
+      requester,
+      local.id_centre,
+      primaryClub
+        ? {
+            id_coach: primaryClub.id_coach,
+            id_centre: primaryClub.id_centre,
+          }
+        : null,
+    );
 
     const { eventDate, startDateTime, endDateTime } = this.buildDateTimes(
       dto.date_event,
@@ -478,12 +613,8 @@ export class EventsService {
       dto.end_time,
     );
 
-    const occurrenceDates = this.buildOccurrenceDates(
-      eventDate,
-      dto.recurrence_type,
-      dto.recurrence_count,
-      dto.recurrence_until,
-    );
+    // Recurrence removed: only single occurrence per event creation
+    const occurrenceDates = [eventDate];
 
     const timeline = this.normalizeTimeline(
       dto.timeline,
@@ -498,15 +629,26 @@ export class EventsService {
         dto.start_time,
       );
       const occurrenceEnd = this.buildTimeOnDate(occurrenceDate, dto.end_time);
-      const conflicts = await this.findConflicts(
+
+      const eventConflicts = await this.findConflicts(
         dto.locaux_id,
         occurrenceDate,
         occurrenceStart,
         occurrenceEnd,
       );
 
-      if (conflicts.length > 0) {
-        conflictsSummary.push(occurrenceDate.toISOString().split('T')[0]);
+      const dateStr = occurrenceDate.toISOString().split('T')[0];
+      const startStr = occurrenceStart.toTimeString().split(' ')[0];
+      const endStr = occurrenceEnd.toTimeString().split(' ')[0];
+      const reservationFree = await this.reservationsService.checkAvailability(
+        dto.locaux_id,
+        dateStr,
+        startStr,
+        endStr,
+      );
+
+      if (eventConflicts.length > 0 || !reservationFree) {
+        conflictsSummary.push(dateStr);
       }
     }
 
@@ -516,8 +658,10 @@ export class EventsService {
       );
     }
 
-    const createdEvents = await this.prisma.$transaction(
-      occurrenceDates.map((occurrenceDate) => {
+    const createdEvents = await this.prisma.$transaction(async (tx) => {
+      const created: any[] = [];
+
+      for (const occurrenceDate of occurrenceDates) {
         const occurrenceStart = this.buildTimeOnDate(
           occurrenceDate,
           dto.start_time,
@@ -527,7 +671,7 @@ export class EventsService {
           dto.end_time,
         );
 
-        return this.prisma.events.create({
+        const ev = await tx.events.create({
           data: {
             nom: dto.nom,
             description: dto.description,
@@ -539,7 +683,8 @@ export class EventsService {
               timeline === undefined
                 ? undefined
                 : (timeline as Prisma.InputJsonValue),
-            club_id: dto.club_id,
+            club_id: primaryClub?.id,
+            collaborating_club_ids: resolvedCollaborators,
             locaux_id: dto.locaux_id,
             created_by: userId,
           },
@@ -548,12 +693,63 @@ export class EventsService {
             local: { select: { id: true, nom: true, id_centre: true } },
           },
         });
-      }),
-    );
+
+        created.push(ev);
+      }
+
+      // Create reservations for the event occurrences
+      const local = await tx.locaux.findUnique({
+        where: { id: dto.locaux_id },
+        select: { prix_heure: true },
+      });
+
+      const reservationsToCreate = occurrenceDates.map((occurrenceDate) => {
+        const occurrenceStart = this.buildTimeOnDate(
+          occurrenceDate,
+          dto.start_time,
+        );
+        const occurrenceEnd = this.buildTimeOnDate(
+          occurrenceDate,
+          dto.end_time,
+        );
+
+        const durationHours =
+          (occurrenceEnd.getTime() - occurrenceStart.getTime()) /
+          (1000 * 60 * 60);
+
+        const prixTotal = local?.prix_heure
+          ? Number(local.prix_heure) * durationHours
+          : 0;
+
+        return {
+          date_reservation: occurrenceDate,
+          heure_debut: occurrenceStart,
+          heure_fin: occurrenceEnd,
+          objet: `Réservation pour événement: ${dto.nom}`,
+          id_utilisateur: userId,
+          id_local: dto.locaux_id,
+          prix_total: prixTotal,
+          statut: 'VALIDEE',
+        } as any;
+      });
+
+      if (reservationsToCreate.length > 0) {
+        const insert = await tx.reservations_locaux.createMany({
+          data: reservationsToCreate,
+        });
+
+        if (!insert.count) {
+          throw new BadRequestException(
+            "Aucune réservation n'a pu être créée pour cet événement.",
+          );
+        }
+      }
+
+      return created;
+    });
 
     return {
       createdCount: createdEvents.length,
-      recurrenceType: dto.recurrence_type ?? 'NONE',
       events: createdEvents,
     };
   }
@@ -666,20 +862,22 @@ export class EventsService {
           eventsWithParticipants += 1;
         }
 
-        const existingClubStat = clubStatsMap.get(event.club.id) ?? {
-          clubId: event.club.id,
-          clubNom: event.club.nom,
-          participants: 0,
-          confirmed: 0,
-          waiting: 0,
-          evenements: 0,
-        };
+        if (event.club) {
+          const existingClubStat = clubStatsMap.get(event.club.id) ?? {
+            clubId: event.club.id,
+            clubNom: event.club.nom,
+            participants: 0,
+            confirmed: 0,
+            waiting: 0,
+            evenements: 0,
+          };
 
-        existingClubStat.participants += participants;
-        existingClubStat.confirmed += confirmed;
-        existingClubStat.waiting += waiting;
-        existingClubStat.evenements += 1;
-        clubStatsMap.set(event.club.id, existingClubStat);
+          existingClubStat.participants += participants;
+          existingClubStat.confirmed += confirmed;
+          existingClubStat.waiting += waiting;
+          existingClubStat.evenements += 1;
+          clubStatsMap.set(event.club.id, existingClubStat);
+        }
 
         for (const participant of event.participants) {
           if (
@@ -871,15 +1069,17 @@ export class EventsService {
     const myAcceptedClubMembership =
       requester.role === 'ADMIN'
         ? null
-        : await this.prisma.inscriptions_clubs.findFirst({
-            where: {
-              id_utilisateur: requester.id,
-              id_club: event.club.id,
-              statut: 'ACCEPTE',
-              est_suspendu: false,
-            },
-            select: { id: true },
-          });
+        : event.club
+          ? await this.prisma.inscriptions_clubs.findFirst({
+              where: {
+                id_utilisateur: requester.id,
+                id_club: event.club.id,
+                statut: 'ACCEPTE',
+                est_suspendu: false,
+              },
+              select: { id: true },
+            })
+          : null;
 
     if (requester.role === 'RESPONSABLE_CENTRE') {
       if (
@@ -889,7 +1089,16 @@ export class EventsService {
         throw new ForbiddenException('Evenement hors de votre centre');
       }
     } else if (requester.role === 'RESPONSABLE_CLUB') {
-      const isManagerOfClub = event.club.id_coach === requester.id;
+      const managedClubIds = await this.getManagedClubIds(requester.id);
+      const relatedClubIds = [
+        event.club?.id,
+        ...(Array.isArray(event.collaborating_club_ids)
+          ? event.collaborating_club_ids
+          : []),
+      ].filter(Boolean) as string[];
+      const isManagerOfClub = relatedClubIds.some((clubId) =>
+        managedClubIds.includes(clubId),
+      );
       const isAcceptedMemberOfClub = Boolean(myAcceptedClubMembership);
       const isEventParticipant =
         myParticipation?.status !== undefined &&
@@ -1031,6 +1240,7 @@ export class EventsService {
       include: {
         club: { select: { id: true, id_coach: true, id_centre: true } },
         local: { select: { id: true, id_centre: true } },
+        createur: { select: { id: true, nom: true, prenom: true } },
       },
     });
 
@@ -1038,22 +1248,50 @@ export class EventsService {
       throw new NotFoundException('Evenement introuvable');
     }
 
-    this.assertCanManageEvent(requester, existing.local.id_centre, {
-      id_coach: existing.club.id_coach,
-      id_centre: existing.club.id_centre,
-    });
-
-    const nextClubId = dto.club_id ?? existing.club_id;
-    const nextLocalId = dto.locaux_id ?? existing.locaux_id;
-    const { local, club } = await this.resolveLocalAndClub(
-      nextLocalId,
-      nextClubId,
+    this.assertCanManageEvent(
+      requester,
+      existing.local.id_centre,
+      existing.club
+        ? {
+            id_coach: existing.club.id_coach,
+            id_centre: existing.club.id_centre,
+          }
+        : null,
     );
 
-    this.assertCanManageEvent(requester, local.id_centre, {
-      id_coach: club.id_coach,
-      id_centre: club.id_centre,
-    });
+    const nextClubSelection = this.normalizeClubSelection(
+      Object.prototype.hasOwnProperty.call(dto, 'club_id')
+        ? dto.club_id
+        : existing.club_id,
+      Object.prototype.hasOwnProperty.call(dto, 'club_ids')
+        ? dto.club_ids
+        : Array.isArray(existing.collaborating_club_ids)
+          ? existing.collaborating_club_ids
+          : [],
+    );
+    const nextLocalId = dto.locaux_id ?? existing.locaux_id;
+    const nextLocal = await this.resolveLocal(nextLocalId);
+    const {
+      primaryClub: nextPrimaryClub,
+      collaboratingClubIds: nextCollaboratingClubIds,
+    } = await this.resolveClubsForEvent(
+      nextLocal.id_centre,
+      nextClubSelection.primaryClubId,
+      nextClubSelection.collaboratingClubIds,
+      requester.id,
+      requester.role,
+    );
+
+    this.assertCanManageEvent(
+      requester,
+      nextLocal.id_centre,
+      nextPrimaryClub
+        ? {
+            id_coach: nextPrimaryClub.id_coach,
+            id_centre: nextPrimaryClub.id_centre,
+          }
+        : null,
+    );
 
     const dateEvent =
       dto.date_event ?? existing.date_event.toISOString().split('T')[0];
@@ -1097,12 +1335,14 @@ export class EventsService {
         ...(timeline !== undefined
           ? { timeline: timeline as Prisma.InputJsonValue }
           : {}),
-        club_id: nextClubId,
+        club_id: nextPrimaryClub?.id,
+        collaborating_club_ids: nextCollaboratingClubIds,
         locaux_id: nextLocalId,
       },
       include: {
-        club: { select: { id: true, nom: true } },
-        local: { select: { id: true, nom: true } },
+        club: { select: { id: true, nom: true, id_centre: true } },
+        local: { select: { id: true, nom: true, id_centre: true } },
+        createur: { select: { id: true, nom: true, prenom: true } },
         _count: { select: { participants: true } },
       },
     });
@@ -1122,7 +1362,18 @@ export class EventsService {
     if ((dto.capacity ?? existing.capacity) !== existing.capacity)
       changes.push('la capacite');
     if (nextLocalId !== existing.locaux_id) changes.push('le local');
-    if (nextClubId !== existing.club_id) changes.push('le club');
+    if ((nextPrimaryClub?.id ?? null) !== existing.club_id)
+      changes.push('le club principal');
+    if (
+      JSON.stringify(nextCollaboratingClubIds) !==
+      JSON.stringify(
+        Array.isArray(existing.collaborating_club_ids)
+          ? existing.collaborating_club_ids
+          : [],
+      )
+    ) {
+      changes.push('les clubs collaborateurs');
+    }
 
     if (changes.length > 0) {
       const participantsToNotify =
@@ -1157,8 +1408,8 @@ export class EventsService {
             utilisateurId: participant.user_id,
             eventId: updatedEvent.id,
             eventNom: updatedEvent.nom,
-            clubId: nextClubId,
-            clubNom: updatedEvent.club.nom,
+            clubId: updatedEvent.club?.id,
+            clubNom: updatedEvent.club?.nom,
             localNom: updatedEvent.local.nom,
             dateEvent: updatedEvent.date_event,
             startTime: updatedEvent.start_time,
@@ -1197,8 +1448,8 @@ export class EventsService {
     }
 
     this.assertCanManageEvent(requester, existing.local.id_centre, {
-      id_coach: existing.club.id_coach,
-      id_centre: existing.club.id_centre,
+      id_coach: existing.club?.id_coach ?? null,
+      id_centre: existing.club?.id_centre ?? existing.local.id_centre,
     });
 
     return this.prisma.events.update({
@@ -1229,8 +1480,8 @@ export class EventsService {
     }
 
     this.assertCanManageEvent(requester, existing.local.id_centre, {
-      id_coach: existing.club.id_coach,
-      id_centre: existing.club.id_centre,
+      id_coach: existing.club?.id_coach ?? null,
+      id_centre: existing.club?.id_centre ?? existing.local.id_centre,
     });
 
     if (!existing.is_active) {
@@ -1274,8 +1525,8 @@ export class EventsService {
           utilisateurId: participant.user_id,
           eventId: existing.id,
           eventNom: existing.nom,
-          clubId: existing.club.id,
-          clubNom: existing.club.nom,
+          clubId: existing.club?.id,
+          clubNom: existing.club?.nom,
           localNom: existing.local.nom,
           dateEvent: existing.date_event,
           startTime: existing.start_time,
@@ -1320,8 +1571,15 @@ export class EventsService {
       excludeEventId,
     );
 
+    const reservationsFree = await this.reservationsService.checkAvailability(
+      localId,
+      date,
+      start,
+      end,
+    );
+
     return {
-      available: conflicts.length === 0,
+      available: conflicts.length === 0 && reservationsFree,
       conflicts,
       durationMinutes: Math.floor(
         (endDateTime.getTime() - startDateTime.getTime()) / 60000,
@@ -1439,7 +1697,7 @@ export class EventsService {
 
     if (
       requester.role === 'RESPONSABLE_CLUB' &&
-      event.club.id_coach !== requester.id
+      event.club?.id_coach !== requester.id
     ) {
       throw new ForbiddenException('Evenement hors de vos clubs');
     }
@@ -1486,8 +1744,8 @@ export class EventsService {
     const requester = await this.resolveRequester(requesterId);
     const event = await this.resolveEventForManagement(eventId);
     this.assertCanManageEvent(requester, event.local.id_centre, {
-      id_coach: event.club.id_coach,
-      id_centre: event.club.id_centre,
+      id_coach: event.club?.id_coach ?? null,
+      id_centre: event.club?.id_centre ?? event.local.id_centre,
     });
 
     const participant = await this.prisma.event_participants.findFirst({
@@ -1541,7 +1799,7 @@ export class EventsService {
             eventId: event.id,
             eventNom: event.nom,
             clubId: event.club_id,
-            clubNom: event.club.nom,
+            clubNom: event.club?.nom,
             dateEvent: event.date_event,
             startTime: event.start_time,
             endTime: event.end_time,
@@ -1569,8 +1827,8 @@ export class EventsService {
     const requester = await this.resolveRequester(requesterId);
     const event = await this.resolveEventForManagement(eventId);
     this.assertCanManageEvent(requester, event.local.id_centre, {
-      id_coach: event.club.id_coach,
-      id_centre: event.club.id_centre,
+      id_coach: event.club?.id_coach ?? null,
+      id_centre: event.club?.id_centre ?? event.local.id_centre,
     });
 
     const participant = await this.prisma.event_participants.findFirst({

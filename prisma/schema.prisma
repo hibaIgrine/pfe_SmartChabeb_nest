@@ -327,8 +327,9 @@ model events {
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
 
-  club_id       String   @db.Uuid
-  club          clubs    @relation(fields: [club_id], references: [id], onDelete: Cascade)
+  club_id       String?  @db.Uuid
+  club          clubs?   @relation(fields: [club_id], references: [id], onDelete: SetNull)
+  collaborating_club_ids String[] @default([])
   locaux_id     String   @db.Uuid
   local         locaux   @relation(fields: [locaux_id], references: [id], onDelete: Restrict)
   created_by    String   @db.Uuid

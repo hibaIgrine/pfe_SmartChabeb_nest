@@ -1,7 +1,6 @@
 import {
   IsArray,
   IsInt,
-  IsIn,
   IsOptional,
   IsString,
   IsUUID,
@@ -9,7 +8,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { EventTimelineStepDto } from './event-timeline-step.dto';
 
 export class UpdateEventDto {
@@ -42,8 +41,21 @@ export class UpdateEventDto {
   end_time?: string;
 
   @IsOptional()
+  @Transform(({ value }) =>
+    value === '' || value === null ? undefined : value,
+  )
   @IsUUID()
   club_id?: string;
+
+  @IsOptional()
+  @IsArray()
+  @Transform(({ value }) =>
+    Array.isArray(value)
+      ? value.filter((item) => item !== '' && item !== null)
+      : value,
+  )
+  @IsUUID('all', { each: true })
+  club_ids?: string[];
 
   @IsOptional()
   @IsUUID()
@@ -53,21 +65,6 @@ export class UpdateEventDto {
   @IsInt()
   @Min(1)
   capacity?: number;
-
-  @IsOptional()
-  @IsIn(['NONE', 'DAILY', 'WEEKLY', 'MONTHLY'])
-  recurrence_type?: 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY';
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  recurrence_count?: number;
-
-  @IsOptional()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'recurrence_until doit respecter le format YYYY-MM-DD',
-  })
-  recurrence_until?: string;
 
   @IsOptional()
   @IsArray()
