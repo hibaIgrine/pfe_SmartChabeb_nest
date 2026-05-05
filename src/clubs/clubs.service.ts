@@ -6,14 +6,33 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
+import { ReservationsService } from 'src/reservations/reservations.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
 @Injectable()
 export class ClubsService {
+  private readonly weekdayIndexes: Record<string, number> = {
+    SUNDAY: 0,
+    MONDAY: 1,
+    TUESDAY: 2,
+    WEDNESDAY: 3,
+    THURSDAY: 4,
+    FRIDAY: 5,
+    SATURDAY: 6,
+    Dimanche: 0,
+    Lundi: 1,
+    Mardi: 2,
+    Mercredi: 3,
+    Jeudi: 4,
+    Vendredi: 5,
+    Samedi: 6,
+  };
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly reservationsService: ReservationsService,
   ) {}
 
   private normalizePlanningObject(planning: any): Record<string, any> {
@@ -69,6 +88,95 @@ export class ClubsService {
         validated_at: currentWorkflow.validated_at ?? null,
       },
     };
+  }
+
+  private getNextWeekdayDate(dayLabel: string): Date {
+    const targetIndex = this.weekdayIndexes[dayLabel];
+    if (targetIndex === undefined) {
+      throw new BadRequestException(`Jour invalide: ${dayLabel}`);
+    }
+
+    const nextDate = new Date();
+    const currentIndex = nextDate.getDay();
+    let daysUntilTarget = (targetIndex - currentIndex + 7) % 7;
+
+    if (daysUntilTarget === 0) {
+      daysUntilTarget = 7;
+    }
+
+    nextDate.setDate(nextDate.getDate() + daysUntilTarget);
+    return nextDate;
+  }
+
+  private formatDateOnly(date: Date): string {
+    return date.toISOString().split('T')[0];
+  }
+
+  private generateWeeklyDates(startDate: Date, occurrences = 52): Date[] {
+    const dates: Date[] = [];
+    for (let i = 0; i < occurrences; i++) {
+      const current = new Date(startDate);
+      current.setDate(startDate.getDate() + i * 7);
+      dates.push(current);
+    }
+    return dates;
+  }
+
+  private normalizePlanningSlots(planning: any) {
+    const normalized = this.normalizePlanningObject(planning);
+    const slots = Array.isArray(normalized.slots) ? normalized.slots : [];
+
+    return slots
+      .map((slot: any) => ({
+        day: (slot?.day ?? '').toString().trim(),
+        startTime: (slot?.startTime ?? '').toString().trim(),
+        endTime: (slot?.endTime ?? '').toString().trim(),
+      }))
+      .filter((slot: { day: string; startTime: string; endTime: string }) =>
+        Boolean(slot.day && slot.startTime && slot.endTime),
+      );
+  }
+
+  private buildRecurringReservations(params: {
+    planning: any;
+    localId: string;
+    clubName: string;
+    userId: string;
+    prixHeure?: number | null;
+  }) {
+    const slots = this.normalizePlanningSlots(params.planning);
+
+    if (slots.length === 0) {
+      return [];
+    }
+
+    return slots.flatMap((slot) => {
+      const startDate = this.getNextWeekdayDate(slot.day);
+      const dates = this.generateWeeklyDates(startDate, 52);
+      const startHour =
+        slot.startTime.length === 5 ? `${slot.startTime}:00` : slot.startTime;
+      const endHour =
+        slot.endTime.length === 5 ? `${slot.endTime}:00` : slot.endTime;
+      const durationHours =
+        (new Date(`1970-01-01T${endHour}`).getTime() -
+          new Date(`1970-01-01T${startHour}`).getTime()) /
+        (1000 * 60 * 60);
+      const prixTotal = params.prixHeure ? params.prixHeure * durationHours : 0;
+
+      return dates.map((dateItem) => {
+        const dateStr = this.formatDateOnly(dateItem);
+        return {
+          date_reservation: new Date(dateStr),
+          heure_debut: new Date(`${dateStr}T${startHour}`),
+          heure_fin: new Date(`${dateStr}T${endHour}`),
+          objet: `Créneau club validé: ${params.clubName}`,
+          statut: 'VALIDEE',
+          prix_total: prixTotal,
+          id_local: params.localId,
+          id_utilisateur: params.userId,
+        };
+      });
+    });
   }
 
   private extractMinimumParticipants(club: { planning: any }): number {
@@ -175,15 +283,25 @@ export class ClubsService {
       throw new BadRequestException('id_centre est obligatoire');
     }
 
-    return await this.prisma.$transaction(async (tx) => {
-      const finalLogoUrl = data.logo_url
-        ? this.saveBase64Image(data.logo_url)
-        : undefined;
-      const finalPlanning = this.withStartWorkflow(
-        data.planning,
-        data.minimum_participants,
-      );
+    const resolvedLocalId = data.id_local || data.id_local_souhaite || null;
+    const finalLogoUrl = data.logo_url
+      ? this.saveBase64Image(data.logo_url)
+      : undefined;
+    const finalPlanning = this.withStartWorkflow(
+      data.planning,
+      data.minimum_participants,
+    );
+    const recurringReservations = resolvedLocalId
+      ? this.buildRecurringReservations({
+          planning: finalPlanning,
+          localId: resolvedLocalId,
+          clubName: data.nom,
+          userId: data.id_coach || requesterId || resolvedLocalId,
+          prixHeure: null,
+        })
+      : [];
 
+    return await this.prisma.$transaction(async (tx) => {
       const nouveauClub = await tx.clubs.create({
         data: {
           nom: data.nom,
@@ -194,9 +312,78 @@ export class ClubsService {
           planning: finalPlanning,
           logo_url: finalLogoUrl,
           capacite: data.capacite ? parseInt(data.capacite) : null,
-          locale_fixe: data.locale_fixe, // 💡 Mis à jour
+          locale_fixe: data.locale_fixe ?? data.locale ?? null,
         },
       });
+
+      if (recurringReservations.length > 0) {
+        const local = await tx.locaux.findUnique({
+          where: { id: resolvedLocalId },
+          select: { prix_heure: true, id_centre: true },
+        });
+
+        if (!local) {
+          throw new BadRequestException('Local introuvable pour le club.');
+        }
+
+        if (local.id_centre !== resolvedCentreId) {
+          throw new BadRequestException(
+            'Le local selectionne ne correspond pas au centre du club.',
+          );
+        }
+
+        const reservationsToCreate = recurringReservations.map(
+          (reservation) => {
+            const durationHours =
+              (reservation.heure_fin.getTime() -
+                reservation.heure_debut.getTime()) /
+              (1000 * 60 * 60);
+            const prixTotal = local.prix_heure
+              ? Number(local.prix_heure) * durationHours
+              : 0;
+
+            return {
+              ...reservation,
+              prix_total: prixTotal,
+            };
+          },
+        );
+
+        const availabilityChecks = await Promise.all(
+          reservationsToCreate.map((reservation) => {
+            const dateStr = reservation.date_reservation
+              .toISOString()
+              .split('T')[0];
+            const startTime = reservation.heure_debut
+              .toTimeString()
+              .split(' ')[0];
+            const endTime = reservation.heure_fin.toTimeString().split(' ')[0];
+
+            return this.reservationsService.checkAvailability(
+              resolvedLocalId,
+              dateStr,
+              startTime,
+              endTime,
+            );
+          }),
+        );
+
+        if (availabilityChecks.some((available) => !available)) {
+          throw new BadRequestException(
+            'Le local choisi est indisponible pour un des créneaux du planning.',
+          );
+        }
+
+        const planningInsert = await tx.reservations_locaux.createMany({
+          data: reservationsToCreate,
+        });
+
+        if (!planningInsert.count) {
+          throw new BadRequestException(
+            "Aucune réservation n'a pu être créée pour ce club.",
+          );
+        }
+      }
 
       if (data.staff && Array.isArray(data.staff)) {
         const staffData = await Promise.all(
@@ -584,7 +771,8 @@ export class ClubsService {
         logo_url: finalLogoUrl !== undefined ? finalLogoUrl : undefined,
         planning: finalPlanning !== undefined ? finalPlanning : undefined,
         capacite: data.capacite ? parseInt(data.capacite) : undefined,
-        locale_fixe: data.locale_fixe,
+        locale_fixe:
+          data.locale_fixe !== undefined ? data.locale_fixe : undefined,
       },
     });
   }
