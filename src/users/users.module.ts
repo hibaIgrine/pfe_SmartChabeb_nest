@@ -10,5 +10,6 @@ import { EtablissementsModule } from 'src/etablissements/etablissements.module';
   imports: [PrismaModule, MailerModule, EtablissementsModule],
   controllers: [UsersController],
   providers: [UsersService],
+  exports: [UsersService],
 })
 export class UsersModule {}

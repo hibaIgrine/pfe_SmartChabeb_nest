@@ -22,11 +22,20 @@ import { UpdateConversationTitleDto } from './dto/update-conversation-title.dto'
 import { UpdateMessageDto } from './dto/update-message.dto';
 import { UpdateTypingDto } from './dto/update-typing.dto';
 import { MessagerieService } from './messagerie.service';
+import { UsersService } from 'src/users/users.service';
 
 @Controller('messagerie')
 @UseGuards(AuthGuard('jwt'))
 export class MessagerieController {
-  constructor(private readonly messagerieService: MessagerieService) {}
+  constructor(
+    private readonly messagerieService: MessagerieService,
+    private readonly usersService: UsersService,
+  ) {}
+
+  @Get('users')
+  getMessengerUsers(@Request() req: any) {
+    return this.usersService.findAllForMessaging(req.user.userId);
+  }
 
   @Get('unread-count')
   getUnreadCount(@Request() req: any) {

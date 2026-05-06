@@ -454,6 +454,27 @@ export class UsersService {
     }
   }
 
+  async findAllForMessaging(requesterId?: string) {
+    try {
+      return await this.prisma.utilisateurs.findMany({
+        where: requesterId ? { id: { not: requesterId } } : undefined,
+        select: {
+          id: true,
+          nom: true,
+          prenom: true,
+          photo_profil_url: true,
+          role: true,
+          is_online: true,
+          last_seen_at: true,
+        },
+        orderBy: { nom: 'asc' },
+      });
+    } catch (error) {
+      console.error('Erreur findAllForMessaging Users:', error);
+      return [];
+    }
+  }
+
   async findOne(id: string) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { id },
