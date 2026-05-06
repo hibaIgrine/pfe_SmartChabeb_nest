@@ -24,6 +24,7 @@ import { StoriesModule } from './stories/stories.module';
 import { EtablissementsModule } from './etablissements/etablissements.module';
 import { CertificatesModule } from './certificates/certificates.module';
 import { PaymentsModule } from './payments/payments.module';
+import { ClubTasksModule } from './club-tasks/club-tasks.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { PaymentsModule } from './payments/payments.module';
     EtablissementsModule,
     CertificatesModule,
     PaymentsModule,
+    ClubTasksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

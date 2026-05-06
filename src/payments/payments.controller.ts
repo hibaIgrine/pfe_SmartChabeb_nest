@@ -11,13 +11,13 @@ import {
 import type { Request, Response } from 'express';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
-import { KonnectService } from './konnect.service';
+import { StripeService } from './stripe.service';
 
 @Controller('payments')
 export class PaymentsController {
   constructor(
     private payments: PaymentsService,
-    private konnect: KonnectService,
+    private stripe: StripeService,
   ) {}
 
   @Post('create')
@@ -28,13 +28,8 @@ export class PaymentsController {
       amount,
       returnUrl,
     );
-    // Expect konnect session contains a redirect URL
-    const checkoutUrl =
-      result.checkoutUrl ??
-      result.session?.url ??
-      result.session?.checkout_url ??
-      result.session?.redirect_url ??
-      null;
+    // Expect stripe session contains a redirect URL
+    const checkoutUrl = result.checkoutUrl ?? result.session?.url ?? null;
     return { checkoutUrl, paymentId: result.payment.id };
   }
 
@@ -43,11 +38,11 @@ export class PaymentsController {
   async webhook(
     @Req() req: Request,
     @Res() res: Response,
-    @Headers('konnect-signature') signature: string,
+    @Headers('stripe-signature') signature: string,
   ) {
     const raw = (req as any).rawBody ?? JSON.stringify(req.body);
 
-    const verified = this.konnect.verifyWebhookSignature(raw, signature);
+    const verified = this.stripe.verifyWebhookSignature(raw, signature);
     if (!verified) {
       return res.status(400).send({ ok: false, message: 'Invalid signature' });
     }

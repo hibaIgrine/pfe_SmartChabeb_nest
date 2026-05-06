@@ -1,13 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { KonnectService } from './konnect.service';
+import { StripeService } from './stripe.service';
 
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
   constructor(
     private prisma: PrismaService,
-    private konnect: KonnectService,
+    private stripe: StripeService,
   ) {}
 
   async createPaymentAndSession(
@@ -24,73 +24,83 @@ export class PaymentsService {
       },
     });
 
-    // Create Konnect session
-    const session: any = await this.konnect.createSession(
+    // Create Stripe session
+    const session = await this.stripe.createCheckoutSession(
       amount,
       payment.id,
       returnUrl,
     );
 
-    // Extract checkout URL from Konnect response (provider fields may vary)
-    const checkoutUrl =
-      session?.url ?? session?.checkout_url ?? session?.redirect_url ?? null;
+    const checkoutUrl = session.url;
 
-    // Save session id returned by Konnect if any
+    // Save session id returned by Stripe
     await this.prisma.payments.update({
       where: { id: payment.id },
-      data: { konnect_session_id: session?.id ?? session?.session_id ?? null },
+      data: { stripe_session_id: session.id },
     });
 
     return { payment, session, checkoutUrl };
   }
 
   async handleWebhookEvent(event: any) {
-    // Minimal handler: expects event.object or event.type containing session/payment info
     this.logger.debug(`Webhook event received: ${JSON.stringify(event)}`);
-    const maybeSessionId =
-      event.data?.session_id ?? event.data?.id ?? event.id ?? null;
-    const status = event.data?.status ?? event.status ?? event.type ?? null;
+    
+    switch (event.type) {
+      case 'checkout.session.completed':
+        const session = event.data.object;
+        await this.handleSuccessfulPayment(session);
+        break;
+      case 'checkout.session.expired':
+        await this.handleExpiredPayment(event.data.object);
+        break;
+      default:
+        this.logger.log(`Unhandled event type: ${event.type}`);
+    }
 
-    if (!maybeSessionId) return { ok: false };
+    return { ok: true };
+  }
 
-    // Try to find payment by konnect_session_id or konnect_payment_id
+  private async handleSuccessfulPayment(session: any) {
     const payment = await this.prisma.payments.findFirst({
-      where: { konnect_session_id: maybeSessionId },
+      where: { stripe_session_id: session.id },
     });
 
     if (!payment) {
-      this.logger.warn('Payment not found for session id ' + maybeSessionId);
+      this.logger.warn('Payment not found for session id ' + session.id);
       return { ok: false };
     }
-
-    const newStatus = /paid|success|completed|PAID/i.test(String(status))
-      ? 'PAID'
-      : /failed|cancel/i.test(String(status))
-        ? 'FAILED'
-        : 'PENDING';
 
     await this.prisma.payments.update({
       where: { id: payment.id },
       data: {
-        status: newStatus,
-        konnect_payment_id: event.data?.payment_id ?? null,
+        status: 'PAID',
+        stripe_payment_id: session.payment_intent,
       },
     });
 
-    if (newStatus === 'PAID') {
-      // Mark reservation as CONFIRMED (if applicable)
-      try {
-        await this.prisma.reservations_locaux.update({
-          where: { id: payment.reservation_id },
-          data: { statut: 'CONFIRME' },
-        });
-      } catch (err) {
-        this.logger.warn(
-          'Failed to update reservation status: ' + (err as any).message,
-        );
-      }
+    // Mark reservation as CONFIRMED
+    try {
+      await this.prisma.reservations_locaux.update({
+        where: { id: payment.reservation_id },
+        data: { statut: 'CONFIRME' },
+      });
+    } catch (err) {
+      this.logger.warn(
+        'Failed to update reservation status: ' + (err as any).message,
+      );
     }
+  }
 
-    return { ok: true };
+  private async handleExpiredPayment(session: any) {
+    const payment = await this.prisma.payments.findFirst({
+      where: { stripe_session_id: session.id },
+    });
+
+    if (payment) {
+      await this.prisma.payments.update({
+        where: { id: payment.id },
+        data: { status: 'CANCELLED' },
+      });
+    }
   }
 }

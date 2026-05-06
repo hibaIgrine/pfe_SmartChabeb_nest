@@ -74,6 +74,8 @@ model utilisateurs {
   presences_club                presences_clubs[]           @relation("presence_membre")
   presences_marquees            presences_clubs[]           @relation("presence_responsable")
   demandes_creation_clubs       demandes_creation_clubs[]
+  taches_creees                 club_taches[]              @relation("club_task_creator")
+  taches_affectees              club_tache_affectations[]
   stories                       stories[]
   story_views                   story_views[]
   deleted_messages_for_everyone messages[]                  @relation("message_deleted_for_everyone_by")
@@ -150,6 +152,7 @@ model clubs {
   responsable utilisateurs? @relation("coach_club", fields: [id_coach], references: [id], onDelete: SetNull)
 
   staff        club_staff[]
+  taches       club_taches[]
   inscriptions inscriptions_clubs[]
   presences    presences_clubs[]
   seances      seances[]
@@ -179,6 +182,43 @@ model club_staff {
   @@unique([id_club, id_utilisateur])
 }
 
+model club_taches {
+  id           String   @id @default(uuid()) @db.Uuid
+  id_club      String   @db.Uuid
+  titre        String   @db.VarChar(120)
+  description  String?  @db.Text
+  priorite     String   @db.VarChar(20)
+  date_limite  DateTime @db.Date
+  type_tache   String   @db.VarChar(80)
+  statut       String   @default("A_FAIRE") @db.VarChar(20)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  id_createur String?       @db.Uuid
+  club        clubs         @relation(fields: [id_club], references: [id], onDelete: Cascade)
+  createur    utilisateurs?  @relation("club_task_creator", fields: [id_createur], references: [id], onDelete: SetNull)
+  affectations club_tache_affectations[]
+
+  @@index([id_club, date_limite])
+  @@index([id_club, priorite])
+  @@index([id_club, statut])
+}
+
+model club_tache_affectations {
+  id              String   @id @default(uuid()) @db.Uuid
+  id_tache        String   @db.Uuid
+  id_utilisateur   String   @db.Uuid
+  date_affectation DateTime @default(now()) @db.Timestamp(6)
+  statut          String   @default("EN_COURS") @db.VarChar(20) // EN_COURS, TERMINE, ANNULE
+
+  tache      club_taches   @relation(fields: [id_tache], references: [id], onDelete: Cascade)
+  utilisateur utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
+
+  @@unique([id_tache, id_utilisateur])
+  @@index([id_tache, statut])
+  @@index([id_utilisateur, statut])
+}
+
 model inscriptions_clubs {
   id                  String    @id @default(uuid()) @db.Uuid
   id_utilisateur      String    @db.Uuid
@@ -191,9 +231,8 @@ model inscriptions_clubs {
   motif_suspension    String?
   role_interne        String?   @default("MEMBRE")
   responsable_id      String?   @db.Uuid
-
-  club        clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)
   utilisateur utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
+  club        clubs         @relation(fields: [id_club], references: [id], onDelete: Cascade)
 
   @@unique([id_utilisateur, id_club])
 }
@@ -335,14 +374,14 @@ model reservations_locaux {
 }
 
 model payments {
-  id                 String   @id @default(uuid()) @db.Uuid
-  reservation_id     String   @db.Uuid
-  amount             Decimal  @db.Decimal(10, 2)
-  status             String   @default("PENDING") @db.VarChar(20)
-  konnect_session_id String?  @db.VarChar(255)
-  konnect_payment_id String?  @db.VarChar(255)
-  created_at         DateTime @default(now())
-  updated_at         DateTime @updatedAt
+  id                String   @id @default(uuid()) @db.Uuid
+  reservation_id    String   @db.Uuid
+  amount            Decimal  @db.Decimal(10, 2)
+  status            String   @default("PENDING") @db.VarChar(20)
+  stripe_session_id String?  @db.VarChar(255)
+  stripe_payment_id String?  @db.VarChar(255)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
 
   reservation reservations_locaux @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
 
