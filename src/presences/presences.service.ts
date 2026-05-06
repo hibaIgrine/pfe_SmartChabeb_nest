@@ -167,12 +167,45 @@ export class PresencesService {
 
     const datePresence = this.normalizeDate(dto.date_presence);
 
+    // Determine seance: if provided validate it belongs to the club,
+    // otherwise try to find a seance on the same date or create one.
+    let seanceId: string | null = dto.id_seance || null;
+
+    if (seanceId) {
+      const seance = await this.prisma.seances.findUnique({
+        where: { id: seanceId },
+        select: { id_club: true },
+      });
+      if (!seance || seance.id_club !== dto.id_club) {
+        throw new BadRequestException('Séance invalide pour ce club');
+      }
+    } else {
+      // try find existing seance for the club on that date
+      const found = await this.prisma.seances.findFirst({
+        where: { id_club: dto.id_club, date_seance: datePresence },
+      });
+      if (found) {
+        seanceId = found.id;
+      } else {
+        // create a lightweight seance record
+        const created = await this.prisma.seances.create({
+          data: {
+            id_club: dto.id_club,
+            date_seance: datePresence,
+            titre: `Séance ${this.formatDate(datePresence)}`,
+            created_by: responsableId,
+          },
+        });
+        seanceId = created.id;
+      }
+    }
+
     return await this.prisma.presences_clubs.upsert({
       where: {
-        id_club_id_utilisateur_date_presence: {
+        id_club_id_utilisateur_id_seance: {
           id_club: dto.id_club,
           id_utilisateur: dto.id_utilisateur,
-          date_presence: datePresence,
+          id_seance: seanceId,
         },
       },
       update: {
@@ -182,6 +215,7 @@ export class PresencesService {
       },
       create: {
         id_club: dto.id_club,
+        id_seance: seanceId,
         id_utilisateur: dto.id_utilisateur,
         id_responsable: responsableId,
         date_presence: datePresence,
@@ -200,8 +234,46 @@ export class PresencesService {
     });
   }
 
+  // Supprime un marquage pour revenir à l'état non marqué.
+  async unmarkPresence(responsableId: string, dto: any) {
+    await this.assertCanManageClub(responsableId, dto.id_club);
+
+    const datePresence = dto.date_presence
+      ? this.normalizeDate(dto.date_presence)
+      : undefined;
+
+    let seanceId: string | null = dto.id_seance || null;
+
+    if (!seanceId && datePresence) {
+      const found = await this.prisma.seances.findFirst({
+        where: { id_club: dto.id_club, date_seance: datePresence },
+        select: { id: true },
+      });
+      seanceId = found?.id || null;
+    }
+
+    if (!seanceId) {
+      throw new BadRequestException('Séance requise pour annuler la présence');
+    }
+
+    await this.prisma.presences_clubs.deleteMany({
+      where: {
+        id_club: dto.id_club,
+        id_utilisateur: dto.id_utilisateur,
+        id_seance: seanceId,
+      },
+    });
+
+    return { success: true };
+  }
+
   // Construit la liste des membres d'un club avec leur statut pour une date.
-  async getMembersForDate(userId: string, clubId: string, date?: string) {
+  async getMembersForDate(
+    userId: string,
+    clubId: string,
+    date?: string,
+    seanceId?: string,
+  ) {
     await this.assertCanManageClub(userId, clubId);
 
     const datePresence = this.normalizeDate(date);
@@ -235,12 +307,15 @@ export class PresencesService {
           where: {
             id_club: clubId,
             id_utilisateur: { in: memberIds },
-            date_presence: datePresence,
+            ...(seanceId
+              ? { id_seance: seanceId }
+              : { date_presence: datePresence }),
           },
           select: {
             id_utilisateur: true,
             statut: true,
             remarque: true,
+            id_seance: true,
           },
         })
       : [];
@@ -286,6 +361,7 @@ export class PresencesService {
     startDate?: string,
     endDate?: string,
     limit = 100,
+    seanceId?: string,
   ) {
     await this.assertCanManageClub(userId, clubId);
 
@@ -300,13 +376,14 @@ export class PresencesService {
       where: {
         id_club: clubId,
         id_utilisateur: memberId || undefined,
+        id_seance: seanceId || undefined,
         date_presence:
-          dateStart || dateEnd
-            ? {
+          seanceId || (!dateStart && !dateEnd)
+            ? undefined
+            : {
                 gte: dateStart,
                 lte: dateEnd,
-              }
-            : undefined,
+              },
       },
       include: {
         membre: {
@@ -326,6 +403,52 @@ export class PresencesService {
       },
       orderBy: [{ date_presence: 'desc' }, { created_at: 'desc' }],
       take,
+    });
+  }
+
+  // Crée ou renvoie une séance pour un club
+  async createSeance(userId: string, dto: any) {
+    await this.assertCanManageClub(userId, dto.id_club);
+
+    const dateSeance = dto.date_seance
+      ? this.normalizeDate(dto.date_seance)
+      : this.normalizeDate();
+
+    // tenter de trouver une séance identique
+    const existing = await this.prisma.seances.findFirst({
+      where: {
+        id_club: dto.id_club,
+        date_seance: dateSeance,
+        titre: dto.titre || undefined,
+      },
+    });
+
+    if (existing) return existing;
+
+    const created = await this.prisma.seances.create({
+      data: {
+        id_club: dto.id_club,
+        date_seance: dateSeance,
+        titre: dto.titre || `Séance ${this.formatDate(dateSeance)}`,
+        heure_debut: dto.heure_debut ? new Date(dto.heure_debut) : undefined,
+        heure_fin: dto.heure_fin ? new Date(dto.heure_fin) : undefined,
+        created_by: userId,
+      },
+    });
+
+    return created;
+  }
+
+  // Liste les séances d'un club (optionnellement filtrées par date)
+  async getSeancesForClub(userId: string, clubId: string, date?: string) {
+    await this.assertCanManageClub(userId, clubId);
+
+    const whereClause: any = { id_club: clubId };
+    if (date) whereClause.date_seance = this.normalizeDate(date);
+
+    return await this.prisma.seances.findMany({
+      where: whereClause,
+      orderBy: { heure_debut: 'asc' },
     });
   }
 
@@ -459,10 +582,31 @@ export class PresencesService {
   }
 
   // Prepare les donnees du jour pour un export de presence.
-  async exportDailyPresence(userId: string, clubId: string, date?: string) {
+  async exportDailyPresence(
+    userId: string,
+    clubId: string,
+    date?: string,
+    seanceId?: string,
+  ) {
     await this.assertCanManageClub(userId, clubId);
 
-    const datePresence = this.normalizeDate(date);
+    const seance = seanceId
+      ? await this.prisma.seances.findUnique({
+          where: { id: seanceId },
+          select: {
+            id: true,
+            id_club: true,
+            date_seance: true,
+            titre: true,
+          },
+        })
+      : null;
+
+    if (seanceId && (!seance || seance.id_club !== clubId)) {
+      throw new BadRequestException('Séance invalide pour ce club');
+    }
+
+    const datePresence = seance?.date_seance ?? this.normalizeDate(date);
     const dateLabel = this.formatDate(datePresence);
 
     const club = await this.prisma.clubs.findUnique({
@@ -521,7 +665,9 @@ export class PresencesService {
     const presences = await this.prisma.presences_clubs.findMany({
       where: {
         id_club: clubId,
-        date_presence: datePresence,
+        ...(seanceId
+          ? { id_seance: seanceId }
+          : { date_presence: datePresence }),
       },
       include: {
         responsable: {
@@ -639,11 +785,23 @@ export class PresencesService {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '') || 'club';
 
+    const sessionSlug = String(seance?.titre || 'seance')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+
     return {
-      fileName: `presence-${clubSlug}-${dateLabel}.csv`,
+      fileName: `presence-${clubSlug}-${sessionSlug || dateLabel}.csv`,
       csv,
       metadata: {
         datePresence: dateLabel,
+        seance: seance
+          ? {
+              id: seance.id,
+              titre: seance.titre,
+              date_seance: this.formatDate(seance.date_seance),
+            }
+          : null,
         club: {
           id: club.id,
           nom: club.nom,

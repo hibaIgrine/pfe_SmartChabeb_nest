@@ -13,14 +13,36 @@ import { ReservationsService } from './reservations.service';
 import { AuthGuard } from '@nestjs/passport';
 import { CreateReservationDto } from './dto/create-reservation.dto';
 
+import { PaymentsService } from 'src/payments/payments.service';
+
 @Controller('reservations')
 @UseGuards(AuthGuard('jwt'))
 export class ReservationsController {
-  constructor(private readonly resService: ReservationsService) {}
+  constructor(
+    private readonly resService: ReservationsService,
+    private readonly paymentsService: PaymentsService,
+  ) {}
 
   @Post()
   create(@Request() req, @Body() dto: CreateReservationDto) {
     return this.resService.create(req.user.userId, dto);
+  }
+
+  @Post('create-with-payment')
+  async createWithPayment(
+    @Request() req,
+    @Body() dto: CreateReservationDto & { returnUrl: string },
+  ) {
+    const reservation = await this.resService.create(req.user.userId, dto);
+    const amount = Number(reservation.prix_total) || 0;
+    const result = await this.paymentsService.createPaymentAndSession(
+      reservation.id,
+      amount,
+      dto.returnUrl,
+    );
+    const checkoutUrl = result.checkoutUrl ?? null;
+    const paymentId = result.payment?.id ?? null;
+    return { reservation, checkoutUrl, paymentId };
   }
 
   @Get()

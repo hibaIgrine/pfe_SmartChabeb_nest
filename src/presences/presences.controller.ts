@@ -12,6 +12,8 @@ import { AuthGuard } from '@nestjs/passport';
 import { Roles } from 'src/auth/roles.decorator';
 import { PresencesService } from './presences.service';
 import { MarkPresenceDto } from './dto/mark-presence.dto';
+import { CreateSeanceDto } from './dto/create-seance.dto';
+import { UnmarkPresenceDto } from './dto/unmark-presence.dto';
 
 /**
  * Couche HTTP du module presences.
@@ -29,6 +31,28 @@ export class PresencesController {
     return await this.presencesService.getManageableClubs(req.user.userId);
   }
 
+  // Crée une séance pour un club (ou la récupère si existe).
+  @Post('seances')
+  @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
+  async createSeance(@Request() req: any, @Body() dto: CreateSeanceDto) {
+    return await this.presencesService.createSeance(req.user.userId, dto);
+  }
+
+  // Liste des séances pour un club (optionnellement sur une date donnée)
+  @Get('clubs/:clubId/seances')
+  @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
+  async getSeancesForClub(
+    @Request() req: any,
+    @Param('clubId') clubId: string,
+    @Query('date') date?: string,
+  ) {
+    return await this.presencesService.getSeancesForClub(
+      req.user.userId,
+      clubId,
+      date,
+    );
+  }
+
   // Enregistre ou met a jour la presence d'un membre.
   @Post('mark')
   @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
@@ -43,11 +67,13 @@ export class PresencesController {
     @Request() req: any,
     @Param('clubId') clubId: string,
     @Query('date') date?: string,
+    @Query('seanceId') seanceId?: string,
   ) {
     return await this.presencesService.getMembersForDate(
       req.user.userId,
       clubId,
       date,
+      seanceId,
     );
   }
 
@@ -61,6 +87,7 @@ export class PresencesController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('limit') limit?: string,
+    @Query('seanceId') seanceId?: string,
   ) {
     const parsedLimit = limit ? parseInt(limit, 10) : 100;
     return await this.presencesService.getHistory(
@@ -70,6 +97,7 @@ export class PresencesController {
       startDate,
       endDate,
       parsedLimit,
+      seanceId,
     );
   }
 
@@ -97,11 +125,20 @@ export class PresencesController {
     @Request() req: any,
     @Param('clubId') clubId: string,
     @Query('date') date: string | undefined,
+    @Query('seanceId') seanceId?: string,
   ) {
     return await this.presencesService.exportDailyPresence(
       req.user.userId,
       clubId,
       date,
+      seanceId,
     );
+  }
+
+  // Supprime un marquage de presence pour permettre de recommencer.
+  @Post('unmark')
+  @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
+  async unmarkPresence(@Request() req: any, @Body() dto: UnmarkPresenceDto) {
+    return await this.presencesService.unmarkPresence(req.user.userId, dto);
   }
 }

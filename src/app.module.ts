@@ -22,6 +22,8 @@ import { SocialMediaModule } from './social-media/social-media.module';
 import { MessagerieModule } from './messagerie/messagerie.module';
 import { StoriesModule } from './stories/stories.module';
 import { EtablissementsModule } from './etablissements/etablissements.module';
+import { CertificatesModule } from './certificates/certificates.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -66,6 +68,8 @@ import { EtablissementsModule } from './etablissements/etablissements.module';
     MessagerieModule,
     StoriesModule,
     EtablissementsModule,
+    CertificatesModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

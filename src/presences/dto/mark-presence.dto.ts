@@ -23,6 +23,10 @@ export class MarkPresenceDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   date_presence?: string;
 
+  @IsOptional()
+  @IsUUID()
+  id_seance?: string;
+
   @IsString()
   @IsIn(['PRESENT', 'ABSENT'])
   statut!: 'PRESENT' | 'ABSENT';

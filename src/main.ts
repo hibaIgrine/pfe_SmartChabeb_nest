@@ -10,6 +10,22 @@ async function bootstrap() {
   // On précise <NestExpressApplication> pour accéder aux fonctions de fichiers statiques
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  // Middleware pour capturer le raw body (nécessaire pour vérifier les webhooks Konnect)
+  app.use((req: any, res, next) => {
+    if (req.method === 'POST' && req.path.includes('/payments/webhook')) {
+      let data = '';
+      req.on('data', (chunk: any) => {
+        data += chunk;
+      });
+      req.on('end', () => {
+        req.rawBody = data;
+        next();
+      });
+    } else {
+      next();
+    }
+  });
+
   // Pour accepter d'énormes formulaires (Base64 Logo Uploads) sans avoir une erreur "Payload Too Large (413)"
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ extended: true, limit: '50mb' }));
