@@ -441,7 +441,7 @@ export class NotificationsService {
         type: isAccepted ? 'RESERVATION_ACCEPTED' : 'RESERVATION_REJECTED',
         titre: isAccepted ? 'Reservation confirmee' : 'Reservation refusee',
         message: isAccepted
-          ? `Votre reservation de ${payload.localNom} le ${dateLabel} (${startLabel}-${endLabel}) a ete confirmee.`
+          ? `Votre reservation de ${payload.localNom} le ${dateLabel} (${startLabel}-${endLabel}) a ete confirmee. Vous pouvez maintenant procéder au paiement pour finaliser votre réservation.`
           : `Votre reservation de ${payload.localNom} le ${dateLabel} (${startLabel}-${endLabel}) a ete refusee.`,
         data: {
           reservationId: payload.reservationId,

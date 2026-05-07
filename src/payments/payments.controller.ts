@@ -36,6 +36,40 @@ export class PaymentsController {
     return { checkoutUrl, paymentId: result.payment.id };
   }
 
+  @Post('pay-reservation')
+  async payReservation(@Body() body: { reservationId: string; returnUrl?: string }) {
+    const { reservationId, returnUrl } = body;
+    
+    // Récupérer les détails de la réservation
+    const reservation = await this.payments['prisma'].reservations_locaux.findUnique({
+      where: { id: reservationId },
+      include: {
+        local: true,
+      }
+    });
+
+    if (!reservation) {
+      throw new Error('Réservation non trouvée');
+    }
+
+    if (reservation.statut !== 'EN_ATTENTE') {
+      throw new Error('Cette réservation ne peut pas être payée');
+    }
+
+    // Créer la session de paiement Stripe
+    const result = await this.payments.createPaymentAndSession(
+      reservationId,
+      Number(reservation.prix_total),
+      returnUrl || 'http://localhost:5173/reservations/my-reservations',
+    );
+
+    return { 
+      checkoutUrl: result.checkoutUrl, 
+      paymentId: result.payment.id,
+      amount: reservation.prix_total
+    };
+  }
+
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
   async webhook(

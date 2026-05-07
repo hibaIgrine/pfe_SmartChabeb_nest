@@ -270,8 +270,8 @@ export class ReservationsService {
           'Vous ne pouvez annuler que vos propres reservations',
         );
       }
-    } else if (requesterRole !== 'ADMIN') {
-      throw new ForbiddenException('Seul l admin peut modifier le statut');
+    } else if (requesterRole !== 'ADMIN' && requesterRole !== 'RESPONSABLE_CENTRE') {
+      throw new ForbiddenException('Seul l admin ou le responsable de centre peuvent modifier le statut');
     }
 
     if (normalizedStatus === 'VALIDEE') {
