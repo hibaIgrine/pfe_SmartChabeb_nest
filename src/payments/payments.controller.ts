@@ -7,6 +7,7 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { PaymentsService } from './payments.service';
@@ -15,6 +16,8 @@ import { StripeService } from './stripe.service';
 
 @Controller('payments')
 export class PaymentsController {
+  private readonly logger = new Logger(PaymentsController.name);
+
   constructor(
     private payments: PaymentsService,
     private stripe: StripeService,
@@ -41,13 +44,20 @@ export class PaymentsController {
     @Headers('stripe-signature') signature: string,
   ) {
     const raw = (req as any).rawBody ?? JSON.stringify(req.body);
+    
+    let event;
+    try {
+      event = JSON.parse(raw);
+    } catch (error) {
+      this.logger.error('Failed to parse webhook body', error);
+      return res.status(400).send({ ok: false, message: 'Invalid JSON' });
+    }
 
     const verified = this.stripe.verifyWebhookSignature(raw, signature);
     if (!verified) {
       return res.status(400).send({ ok: false, message: 'Invalid signature' });
     }
 
-    const event = req.body;
     await this.payments.handleWebhookEvent(event);
     return res.send({ ok: true });
   }

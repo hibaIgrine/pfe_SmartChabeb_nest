@@ -53,6 +53,16 @@ export class PaymentsService {
       case 'checkout.session.expired':
         await this.handleExpiredPayment(event.data.object);
         break;
+      case 'payment_intent.succeeded':
+      case 'charge.succeeded':
+        // Ces événements sont déjà gérés via checkout.session.completed
+        this.logger.log(`Payment event received: ${event.type}`);
+        break;
+      case 'payment_intent.created':
+      case 'charge.updated':
+        // Événements informatifs, pas besoin de traitement spécial
+        this.logger.log(`Info event received: ${event.type}`);
+        break;
       default:
         this.logger.log(`Unhandled event type: ${event.type}`);
     }
