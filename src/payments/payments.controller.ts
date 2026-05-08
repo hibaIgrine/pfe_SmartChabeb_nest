@@ -2,17 +2,20 @@ import {
   Body,
   Controller,
   Post,
+  Get,
   Req,
   Res,
   Headers,
   HttpCode,
   HttpStatus,
   Logger,
+  UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { StripeService } from './stripe.service';
+import { AuthGuard } from '@nestjs/passport';
 
 @Controller('payments')
 export class PaymentsController {
@@ -22,6 +25,17 @@ export class PaymentsController {
     private payments: PaymentsService,
     private stripe: StripeService,
   ) {}
+
+  @Get('my-payments')
+  @UseGuards(AuthGuard('jwt'))
+  async getMyPayments(@Req() req) {
+    const userId = req.user.userId;
+    const userRole = req.user.role;
+    
+    this.logger.log(`Getting payments for user ${userId} with role ${userRole}`);
+    
+    return await this.payments.getUserPayments(userId, userRole);
+  }
 
   @Post('create')
   async create(@Body() body: CreatePaymentDto) {

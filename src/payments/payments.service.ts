@@ -121,6 +121,79 @@ export class PaymentsService {
     }
   }
 
+  async getUserPayments(userId: string, userRole: string) {
+    this.logger.log(`Getting payments for user ${userId} with role ${userRole}`);
+    
+    // D'abord, vérifions tous les paiements dans la base
+    const allPayments = await this.prisma.payments.findMany({
+      select: {
+        id: true,
+        amount: true,
+        status: true,
+        created_at: true,
+        reservation_id: true,
+        stripe_session_id: true
+      }
+    });
+    this.logger.log(`Total payments in database: ${allPayments.length}`);
+    this.logger.log('All payments:', JSON.stringify(allPayments, null, 2));
+    
+    let whereClause: any = {
+      status: 'PAID'  // Uniquement les paiements effectués
+    };
+    
+    // Si l'utilisateur n'est pas admin, filtrer par ses réservations
+    if (userRole !== 'ADMIN') {
+      whereClause = {
+        ...whereClause,
+        reservation: {
+          id_utilisateur: userId
+        }
+      };
+      this.logger.log(`Filtering for user ${userId} with where clause:`, JSON.stringify(whereClause, null, 2));
+    }
+    
+    const payments = await this.prisma.payments.findMany({
+      where: whereClause,
+      include: {
+        reservation: {
+          include: {
+            local: {
+              include: {
+                centre: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        created_at: 'desc'
+      }
+    });
+    
+    this.logger.log(`Found ${payments.length} payments for user ${userId} with role ${userRole}`);
+    this.logger.log('Filtered payments:', JSON.stringify(payments, null, 2));
+    
+    return payments.map(payment => ({
+      id: payment.id,
+      amount: payment.amount,
+      status: payment.status,
+      payment_method: 'stripe', // Par défaut, on utilise Stripe
+      created_at: payment.created_at,
+      updated_at: payment.updated_at,
+      reservation: payment.reservation ? {
+        id: payment.reservation.id,
+        objet: payment.reservation.objet,
+        local: {
+          nom: payment.reservation.local.nom
+        },
+        date_reservation: payment.reservation.date_reservation
+      } : null,
+      stripe_session_id: payment.stripe_session_id,
+      stripe_payment_id: payment.stripe_payment_id
+    }));
+  }
+
   private async handleExpiredPayment(session: any) {
     const payment = await this.prisma.payments.findFirst({
       where: { stripe_session_id: session.id },
