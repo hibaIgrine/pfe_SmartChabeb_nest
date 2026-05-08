@@ -43,11 +43,15 @@ export class PaymentsService {
   }
 
   async handleWebhookEvent(event: any) {
-    this.logger.debug(`Webhook event received: ${JSON.stringify(event)}`);
+    this.logger.log(`Processing webhook event: ${event.type}`);
     
     switch (event.type) {
       case 'checkout.session.completed':
+        this.logger.log('Processing checkout.session.completed event');
         const session = event.data.object;
+        this.logger.log('Session ID:', session.id);
+        this.logger.log('Session payment_intent:', session.payment_intent);
+        this.logger.log('Session status:', session.status);
         await this.handleSuccessfulPayment(session);
         break;
       case 'checkout.session.expired':
@@ -71,14 +75,24 @@ export class PaymentsService {
   }
 
   private async handleSuccessfulPayment(session: any) {
+    this.logger.log('Looking for payment with session id:', session.id);
+    
     const payment = await this.prisma.payments.findFirst({
       where: { stripe_session_id: session.id },
     });
 
     if (!payment) {
       this.logger.warn('Payment not found for session id ' + session.id);
+      // Log all existing payments for debugging
+      const allPayments = await this.prisma.payments.findMany({
+        select: { id: true, stripe_session_id: true, status: true }
+      });
+      this.logger.log('Existing payments:', JSON.stringify(allPayments, null, 2));
       return { ok: false };
     }
+
+    this.logger.log('Found payment:', JSON.stringify(payment, null, 2));
+    this.logger.log('Updating payment status to PAID for payment ID:', payment.id);
 
     await this.prisma.payments.update({
       where: { id: payment.id },
@@ -88,12 +102,18 @@ export class PaymentsService {
       },
     });
 
+    this.logger.log('Payment updated successfully to PAID');
+
     // Mark reservation as CONFIRMED
     try {
+      this.logger.log('Updating reservation status to CONFIRME for reservation ID:', payment.reservation_id);
+      
       await this.prisma.reservations_locaux.update({
         where: { id: payment.reservation_id },
         data: { statut: 'CONFIRME' },
       });
+      
+      this.logger.log('Reservation status updated successfully to CONFIRME');
     } catch (err) {
       this.logger.warn(
         'Failed to update reservation status: ' + (err as any).message,

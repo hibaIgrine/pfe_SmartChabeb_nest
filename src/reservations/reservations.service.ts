@@ -4,6 +4,7 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -12,6 +13,8 @@ import { CreateReservationDto } from './dto/create-reservation.dto';
 
 @Injectable()
 export class ReservationsService {
+  private readonly logger = new Logger(ReservationsService.name);
+  
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
@@ -64,24 +67,9 @@ export class ReservationsService {
     }
 
     if (role === 'RESPONSABLE_CLUB') {
-      const clubs = await this.prisma.clubs.findMany({
-        where: { id_coach: userId, est_actif: true },
-        select: { id_centre: true },
-      });
-
-      const centreIds = [...new Set(clubs.map((c) => c.id_centre))].filter(
-        Boolean,
-      );
-
-      if (centreIds.length === 0) {
-        return { id: { in: [] } };
-      }
-
-      return {
-        local: {
-          id_centre: { in: centreIds },
-        },
-      };
+      // Pour un responsable de club, il ne doit voir que SES propres réservations
+      // Pas celles de tous les clubs du centre
+      return { id_utilisateur: userId };
     }
 
     return { id_utilisateur: userId };
@@ -216,13 +204,17 @@ export class ReservationsService {
    * 📋 LISTER LES RÉSERVATIONS
    */
   async findAll(userId?: string, role?: string) {
+    this.logger.log(`findAll called with userId: ${userId}, role: ${role}`);
+    
     if (!userId) {
+      this.logger.warn('No userId provided, returning empty array');
       return [];
     }
 
     const where = await this.buildReservationScopeWhere(userId, role);
+    this.logger.log('Built where clause:', JSON.stringify(where, null, 2));
 
-    return await this.prisma.reservations_locaux.findMany({
+    const reservations = await this.prisma.reservations_locaux.findMany({
       where,
       include: {
         utilisateur: { select: { nom: true, prenom: true, email: true } },
@@ -239,6 +231,10 @@ export class ReservationsService {
       },
       orderBy: { date_creation: 'desc' },
     });
+
+    this.logger.log(`Found ${reservations.length} reservations for user ${userId} with role ${role}`);
+    
+    return reservations;
   }
 
   /**

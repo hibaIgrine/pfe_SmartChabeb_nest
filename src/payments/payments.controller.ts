@@ -77,11 +77,16 @@ export class PaymentsController {
     @Res() res: Response,
     @Headers('stripe-signature') signature: string,
   ) {
+    this.logger.log('Webhook received - Starting processing');
+    
     const raw = (req as any).rawBody ?? JSON.stringify(req.body);
+    this.logger.log('Raw body length:', raw.length);
     
     let event;
     try {
       event = JSON.parse(raw);
+      this.logger.log('Webhook event type:', event.type);
+      this.logger.log('Webhook event ID:', event.id);
     } catch (error) {
       this.logger.error('Failed to parse webhook body', error);
       return res.status(400).send({ ok: false, message: 'Invalid JSON' });
@@ -89,10 +94,20 @@ export class PaymentsController {
 
     const verified = this.stripe.verifyWebhookSignature(raw, signature);
     if (!verified) {
+      this.logger.error('Webhook signature verification failed');
       return res.status(400).send({ ok: false, message: 'Invalid signature' });
     }
+    
+    this.logger.log('Webhook signature verified successfully');
 
-    await this.payments.handleWebhookEvent(event);
+    try {
+      await this.payments.handleWebhookEvent(event);
+      this.logger.log('Webhook event processed successfully');
+    } catch (error) {
+      this.logger.error('Error processing webhook event:', error);
+      return res.status(500).send({ ok: false, message: 'Processing error' });
+    }
+
     return res.send({ ok: true });
   }
 }
