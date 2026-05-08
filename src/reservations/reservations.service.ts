@@ -227,6 +227,15 @@ export class ReservationsService {
       include: {
         utilisateur: { select: { nom: true, prenom: true, email: true } },
         local: { include: { centre: true } },
+        payments: {
+          select: {
+            id: true,
+            status: true,
+            amount: true,
+            created_at: true,
+          },
+          orderBy: { created_at: 'desc' },
+        },
       },
       orderBy: { date_creation: 'desc' },
     });

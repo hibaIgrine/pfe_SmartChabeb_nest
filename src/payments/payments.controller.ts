@@ -52,7 +52,7 @@ export class PaymentsController {
       throw new Error('Réservation non trouvée');
     }
 
-    if (reservation.statut !== 'EN_ATTENTE') {
+    if (!['EN_ATTENTE', 'VALIDEE'].includes(reservation.statut)) {
       throw new Error('Cette réservation ne peut pas être payée');
     }
 
