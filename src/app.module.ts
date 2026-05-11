@@ -26,6 +26,9 @@ import { CertificatesModule } from './certificates/certificates.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ClubTasksModule } from './club-tasks/club-tasks.module';
 
+import { RecommendationsModule } from './recommendations/recommendations.module';
+import { SessionsModule } from './sessions/sessions.module';
+
 @Module({
   imports: [
     // 1. Charger les variables d'environnement
@@ -72,6 +75,8 @@ import { ClubTasksModule } from './club-tasks/club-tasks.module';
     CertificatesModule,
     PaymentsModule,
     ClubTasksModule,
+    SessionsModule,
+    RecommendationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

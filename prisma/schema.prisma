@@ -80,6 +80,7 @@ model utilisateurs {
   story_views                   story_views[]
   deleted_messages_for_everyone messages[]                  @relation("message_deleted_for_everyone_by")
   deleted_messages_for_me       message_deleted_for_users[]
+  recommendation_sessions       recommendation_sessions[]
 }
 
 enum message_type {
@@ -157,6 +158,7 @@ model clubs {
   presences    presences_clubs[]
   seances      seances[]
   events       events[]
+  recommendation_sessions recommendation_sessions[]
 }
 
 model club_roles {
@@ -273,6 +275,65 @@ model seances {
   presences presences_clubs[]
 
   @@index([id_club, date_seance])
+}
+
+// ==========================================
+// 3.b MODULE RECOMMENDATION (ML)
+// ==========================================
+
+model recommendation_sessions {
+  id             Int      @id @default(autoincrement())
+  id_club        String   @db.Uuid
+  id_responsable String?  @db.Uuid
+  tranche_age    String   @db.VarChar(50)
+  niveau         String   @db.VarChar(50)
+  num_seance     Int
+  phase_annee    String   @db.VarChar(80)
+  saison         String   @db.VarChar(30)
+  mois           Int
+  jour_semaine   String   @db.VarChar(30)
+  format_seance  String   @db.VarChar(80)
+  lieu           String   @db.VarChar(120)
+  duree_minutes  Int
+  activite_j_minus_2  String? @db.VarChar(120)
+  activite_precedente String? @db.VarChar(120)
+  activite_actuelle   String  @db.VarChar(120)
+  difficulte          String  @db.VarChar(50)
+  niveau_fatigue      String  @db.VarChar(50)
+  humeur_groupe       String  @db.VarChar(50)
+  score_engagement    Float
+  nb_membres_total    Int
+  nb_presents         Int
+  taux_presence       Float
+  note_technique      Float
+  note_comportement   Float
+  evaluation_coach    String  @db.VarChar(80)
+  progression_observee String @db.VarChar(80)
+  meteo               String  @db.VarChar(50)
+  activite_exterieure String  @default("Non") @db.VarChar(20)
+  repetition_activite Int     @default(0)
+  sequence_logique    Int     @default(1)
+  created_at          DateTime @default(now())
+
+  club          clubs         @relation(fields: [id_club], references: [id], onDelete: Cascade)
+  responsable   utilisateurs? @relation(fields: [id_responsable], references: [id], onDelete: SetNull)
+  history       recommendation_history[]
+
+  @@index([id_club, created_at])
+  @@index([id_responsable, created_at])
+}
+
+model recommendation_history {
+  id              Int      @id @default(autoincrement())
+  session_id      Int
+  recommandations Json
+  modele_utilise  String   @db.VarChar(120)
+  activite_choisie String? @db.VarChar(120)
+  created_at      DateTime @default(now())
+
+  session recommendation_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade)
+
+  @@index([session_id, created_at])
 }
 
 // ==========================================
