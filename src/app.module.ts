@@ -28,6 +28,7 @@ import { ClubTasksModule } from './club-tasks/club-tasks.module';
 
 import { RecommendationsModule } from './recommendations/recommendations.module';
 import { SessionsModule } from './sessions/sessions.module';
+import { ChatbotModule } from './chatbot/chatbot.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { SessionsModule } from './sessions/sessions.module';
     ClubTasksModule,
     SessionsModule,
     RecommendationsModule,
+    ChatbotModule,
   ],
   controllers: [AppController],
   providers: [AppService],
