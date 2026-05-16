@@ -58,4 +58,11 @@ export class CentresController {
   remove(@Param('id') id: string) {
     return this.centresService.remove(id);
   }
+
+  @Patch(':id/activate')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN')
+  activate(@Param('id') id: string) {
+    return this.centresService.activate(id);
+  }
 }

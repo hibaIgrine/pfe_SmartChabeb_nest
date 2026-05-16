@@ -185,8 +185,13 @@ export class UsersService {
 
   // Vérifie si un email est disponible
   async checkEmailAvailable(email: string) {
+    if (!email || typeof email !== 'string') {
+      return { available: false };
+    }
+    const sanitized = email.trim().toLowerCase();
+    if (!sanitized) return { available: false };
     const user = await this.prisma.utilisateurs.findUnique({
-      where: { email },
+      where: { email: sanitized },
     });
     return { available: !user };
   }
@@ -656,16 +661,41 @@ export class UsersService {
       throw new NotFoundException('Centre introuvable');
     }
 
-    return await this.prisma.utilisateurs.update({
-      where: { id: userId },
-      data: {
+    const adherentRole = await this.prisma.roles.findUnique({
+      where: { nom: 'ADHERENT' },
+    });
+
+    const previousResponsible = await this.prisma.utilisateurs.findFirst({
+      where: {
         id_centre,
         role: 'RESPONSABLE_CENTRE',
-        id_role: roleObj?.id,
+        NOT: { id: userId },
       },
-      include: {
-        centre: true,
-      },
+      select: { id: true },
+    });
+
+    return await this.prisma.$transaction(async (tx) => {
+      if (previousResponsible) {
+        await tx.utilisateurs.update({
+          where: { id: previousResponsible.id },
+          data: {
+            role: 'ADHERENT',
+            id_role: adherentRole?.id,
+          },
+        });
+      }
+
+      return await tx.utilisateurs.update({
+        where: { id: userId },
+        data: {
+          id_centre,
+          role: 'RESPONSABLE_CENTRE',
+          id_role: roleObj?.id,
+        },
+        include: {
+          centre: true,
+        },
+      });
     });
   }
 

@@ -53,6 +53,25 @@ export class CentresService {
     const centre = await this.prisma.centres.findUnique({
       where: { id },
       include: {
+        _count: {
+          select: {
+            utilisateurs: true,
+            clubs: true,
+            locaux: true,
+            inventaire: true,
+          },
+        },
+        utilisateurs: {
+          where: { role: 'RESPONSABLE_CENTRE' },
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            photo_profil_url: true,
+            role: true,
+          },
+        },
         locaux: true,
         inventaire: true,
         clubs: {
@@ -100,6 +119,25 @@ export class CentresService {
       if (error.code === 'P2025') {
         throw new NotFoundException(
           'Impossible de désactiver : centre introuvable.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  // ==========================================
+  // Réactiver un centre désactivé
+  // ==========================================
+  async activate(id: string) {
+    try {
+      return await this.prisma.centres.update({
+        where: { id },
+        data: { est_actif: true },
+      });
+    } catch (error) {
+      if (error.code === 'P2025') {
+        throw new NotFoundException(
+          'Impossible de réactiver : centre introuvable.',
         );
       }
       throw error;
