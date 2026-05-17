@@ -38,6 +38,12 @@ export class ClubsController {
     return await this.clubsService.findClubsForUserCentre(req.user.userId);
   }
 
+  @Get('my-staff-clubs')
+  @UseGuards(AuthGuard('jwt'))
+  async getMyStaffClubs(@Request() req: any) {
+    return await this.clubsService.findMyStaffClubs(req.user.userId);
+  }
+
   @Get('my-centre/:id')
   @UseGuards(AuthGuard('jwt'))
   async getMyCentreClubDetails(@Param('id') id: string, @Request() req) {

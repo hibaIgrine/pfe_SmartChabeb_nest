@@ -7,10 +7,42 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateClubTaskDto } from './dto/create-club-task.dto';
 import { UpdateClubTaskDto } from './dto/update-club-task.dto';
+import { UpdateClubTaskStatusDto } from './dto/update-club-task-status.dto';
+
+type TaskStatus =
+  | 'EN_ATTENTE'
+  | 'EN_COURS'
+  | 'TERMINE'
+  | 'VALIDEE'
+  | 'REFUSE'
+  | 'ANNULE';
 
 @Injectable()
 export class ClubTasksService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private readonly taskInclude = {
+    createur: {
+      select: {
+        id: true,
+        nom: true,
+        prenom: true,
+        photo_profil_url: true,
+      },
+    },
+    affectations: {
+      include: {
+        utilisateur: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            photo_profil_url: true,
+          },
+        },
+      },
+    },
+  };
 
   private async getTaskOrThrow(taskId: string, clubId: string) {
     const task = await this.prisma.club_taches.findFirst({
@@ -22,6 +54,22 @@ export class ClubTasksService {
     }
 
     return task;
+  }
+
+  private async getTaskWithRelationsOrThrow(taskId: string, clubId: string) {
+    const task = await this.prisma.club_taches.findFirst({
+      where: { id: taskId, id_club: clubId },
+      include: this.taskInclude,
+    });
+
+    if (!task) {
+      throw new NotFoundException('Tache introuvable');
+    }
+
+    return {
+      ...task,
+      statut: this.normalizeStoredStatus(task.statut),
+    };
   }
 
   private normalizePriority(value: string): 'HAUTE' | 'MOYENNE' | 'FAIBLE' {
@@ -49,6 +97,137 @@ export class ClubTasksService {
     }
 
     return parsedDate;
+  }
+
+  private normalizeStoredStatus(value: string | null | undefined): TaskStatus {
+    const normalized = (value || '').toUpperCase().trim();
+
+    if (normalized === 'A_FAIRE') {
+      return 'EN_ATTENTE';
+    }
+
+    if (
+      ![
+        'EN_ATTENTE',
+        'EN_COURS',
+        'TERMINE',
+        'VALIDEE',
+        'REFUSE',
+        'ANNULE',
+      ].includes(normalized)
+    ) {
+      return 'EN_ATTENTE';
+    }
+
+    return normalized as TaskStatus;
+  }
+
+  private normalizeTaskStatus(value: string): TaskStatus {
+    const normalized = this.normalizeStoredStatus(value);
+
+    if (
+      ![
+        'EN_ATTENTE',
+        'EN_COURS',
+        'TERMINE',
+        'VALIDEE',
+        'REFUSE',
+        'ANNULE',
+      ].includes(normalized)
+    ) {
+      throw new BadRequestException('Statut de tache invalide');
+    }
+
+    return normalized;
+  }
+
+  private assertStatusTransition(params: {
+    currentStatus: TaskStatus;
+    nextStatus: TaskStatus;
+    role: string;
+  }) {
+    const current = this.normalizeTaskStatus(params.currentStatus);
+    const next = this.normalizeTaskStatus(params.nextStatus);
+    const role = (params.role || '').toUpperCase();
+
+    if (current === next) {
+      return;
+    }
+
+    const isManager =
+      role === 'RESPONSABLE_CLUB' ||
+      role === 'RESPONSABLE_CENTRE' ||
+      role === 'ADMIN';
+
+    if (isManager) {
+      if (current !== 'TERMINE' || !['VALIDEE', 'REFUSE'].includes(next)) {
+        throw new BadRequestException(
+          'Le responsable ne peut valider ou refuser qu une tache terminee',
+        );
+      }
+      return;
+    }
+
+    if (next === 'EN_COURS') {
+      if (current !== 'EN_ATTENTE') {
+        throw new BadRequestException(
+          'Une tache ne peut passer en cours que depuis le statut en attente',
+        );
+      }
+      return;
+    }
+
+    if (next === 'TERMINE') {
+      if (current !== 'EN_COURS') {
+        throw new BadRequestException(
+          'Une tache ne peut etre terminee que depuis le statut en cours',
+        );
+      }
+      return;
+    }
+
+    if (next === 'ANNULE') {
+      if (!['EN_ATTENTE', 'EN_COURS'].includes(current)) {
+        throw new BadRequestException(
+          'Une tache ne peut etre annulee que depuis les statuts en attente ou en cours',
+        );
+      }
+      return;
+    }
+
+    throw new BadRequestException('Transition de statut non autorisee');
+  }
+
+  private async getTaskByClubAndUser(
+    taskId: string,
+    clubId: string,
+    userId: string,
+  ) {
+    const task = await this.prisma.club_taches.findFirst({
+      where: {
+        id: taskId,
+        id_club: clubId,
+        affectations: {
+          some: { id_utilisateur: userId },
+        },
+      },
+      include: this.taskInclude,
+    });
+
+    if (!task) {
+      throw new NotFoundException('Tache introuvable');
+    }
+
+    return {
+      ...task,
+      statut: this.normalizeStoredStatus(task.statut),
+    };
+  }
+
+  private async getTaskForStatusChange(taskId: string, clubId: string) {
+    return await this.prisma.club_taches.findFirst({
+      where: { id: taskId, id_club: clubId },
+    });
   }
 
   private async assertCanManageClub(userId: string, clubId: string) {
@@ -98,32 +277,52 @@ export class ClubTasksService {
   async findAll(userId: string, clubId: string) {
     await this.assertCanManageClub(userId, clubId);
 
-    return await this.prisma.club_taches.findMany({
+    const tasks = await this.prisma.club_taches.findMany({
       where: { id_club: clubId },
-      include: {
-        createur: {
-          select: {
-            id: true,
-            nom: true,
-            prenom: true,
-            photo_profil_url: true,
-          },
-        },
-        affectations: {
-          include: {
-            utilisateur: {
-              select: {
-                id: true,
-                nom: true,
-                prenom: true,
-                photo_profil_url: true,
-              },
-            },
-          },
-        },
-      },
+      include: this.taskInclude,
       orderBy: [{ date_limite: 'asc' }, { created_at: 'desc' }],
     });
+
+    return tasks.map((task) => ({
+      ...task,
+      statut: this.normalizeStoredStatus(task.statut),
+    }));
+  }
+
+  async findAssignedTasks(userId: string, clubId: string) {
+    const assignedInClub = await this.prisma.club_staff.findFirst({
+      where: { id_club: clubId, id_utilisateur: userId, is_active: true },
+    });
+
+    const isManager = await this.prisma.utilisateurs.findFirst({
+      where: {
+        id: userId,
+        role: { in: ['RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE', 'ADMIN'] },
+      },
+      select: { id: true },
+    });
+
+    if (!assignedInClub && !isManager) {
+      throw new ForbiddenException(
+        'Vous ne pouvez consulter que les taches de votre club',
+      );
+    }
+
+    const tasks = await this.prisma.club_taches.findMany({
+      where: {
+        id_club: clubId,
+        affectations: {
+          some: { id_utilisateur: userId },
+        },
+      },
+      include: this.taskInclude,
+      orderBy: [{ date_limite: 'asc' }, { created_at: 'desc' }],
+    });
+
+    return tasks.map((task) => ({
+      ...task,
+      statut: this.normalizeStoredStatus(task.statut),
+    }));
   }
 
   async create(userId: string, clubId: string, dto: CreateClubTaskDto) {
@@ -152,17 +351,9 @@ export class ClubTasksService {
         priorite,
         date_limite: dateLimite,
         type_tache: typeTache,
+        statut: 'EN_ATTENTE',
       },
-      include: {
-        createur: {
-          select: {
-            id: true,
-            nom: true,
-            prenom: true,
-            photo_profil_url: true,
-          },
-        },
-      },
+      include: this.taskInclude,
     });
   }
 
@@ -173,22 +364,25 @@ export class ClubTasksService {
     affectationData: { utilisateurs: string[] },
   ) {
     await this.assertCanManageClub(userId, clubId);
-
     await this.getTaskOrThrow(taskId, clubId);
 
-    // Supprimer les affectations existantes
     await this.prisma.club_tache_affectations.deleteMany({
       where: { id_tache: taskId },
     });
 
-    // Créer les nouvelles affectations
-    const affectations = affectationData.utilisateurs.map((utilisateurId) => ({
-      id_tache: taskId,
-      id_utilisateur: utilisateurId,
-    }));
+    const utilisateurs = Array.isArray(affectationData.utilisateurs)
+      ? affectationData.utilisateurs
+      : [];
+
+    if (utilisateurs.length === 0) {
+      return { message: 'Aucune affectation ajoutee' };
+    }
 
     return await this.prisma.club_tache_affectations.createMany({
-      data: affectations,
+      data: utilisateurs.map((utilisateurId) => ({
+        id_tache: taskId,
+        id_utilisateur: utilisateurId,
+      })),
     });
   }
 
@@ -199,18 +393,17 @@ export class ClubTasksService {
     affectationData: { utilisateurs: string[] },
   ) {
     await this.assertCanManageClub(userId, clubId);
-
     await this.getTaskOrThrow(taskId, clubId);
 
-    // Récupérer les affectations actuelles
     const affectationsActuelles =
       await this.prisma.club_tache_affectations.findMany({
         where: { id_tache: taskId },
       });
 
-    // Supprimer les affectations qui ne sont plus dans la nouvelle liste
     const idsActuels = affectationsActuelles.map((a) => a.id_utilisateur);
-    const idsNouveaux = affectationData.utilisateurs;
+    const idsNouveaux = Array.isArray(affectationData.utilisateurs)
+      ? affectationData.utilisateurs
+      : [];
     const idsASupprimer = idsActuels.filter((id) => !idsNouveaux.includes(id));
 
     if (idsASupprimer.length > 0) {
@@ -222,16 +415,13 @@ export class ClubTasksService {
       });
     }
 
-    // Ajouter les nouvelles affectations
     const idsAAjouter = idsNouveaux.filter((id) => !idsActuels.includes(id));
     if (idsAAjouter.length > 0) {
-      const nouvellesAffectations = idsAAjouter.map((utilisateurId) => ({
-        id_tache: taskId,
-        id_utilisateur: utilisateurId,
-      }));
-
       await this.prisma.club_tache_affectations.createMany({
-        data: nouvellesAffectations,
+        data: idsAAjouter.map((utilisateurId) => ({
+          id_tache: taskId,
+          id_utilisateur: utilisateurId,
+        })),
       });
     }
 
@@ -296,31 +486,59 @@ export class ClubTasksService {
       });
     }
 
-    return await this.prisma.club_taches.findUnique({
-      where: { id: taskId },
-      include: {
-        createur: {
-          select: {
-            id: true,
-            nom: true,
-            prenom: true,
-            photo_profil_url: true,
-          },
-        },
-        affectations: {
-          include: {
-            utilisateur: {
-              select: {
-                id: true,
-                nom: true,
-                prenom: true,
-                photo_profil_url: true,
-              },
-            },
-          },
-        },
-      },
+    return await this.getTaskWithRelationsOrThrow(taskId, clubId);
+  }
+
+  async updateStatus(
+    userId: string,
+    role: string,
+    clubId: string,
+    taskId: string,
+    dto: UpdateClubTaskStatusDto,
+  ) {
+    const currentUser = await this.prisma.utilisateurs.findUnique({
+      where: { id: userId },
+      select: { role: true },
     });
+
+    if (!currentUser) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    const effectiveRole = (role || currentUser.role || '').toUpperCase();
+    const isManager = [
+      'RESPONSABLE_CLUB',
+      'RESPONSABLE_CENTRE',
+      'ADMIN',
+    ].includes(effectiveRole);
+
+    const task = isManager
+      ? await this.getTaskForStatusChange(taskId, clubId)
+      : await this.getTaskByClubAndUser(taskId, clubId, userId);
+
+    if (!task) {
+      throw new NotFoundException('Tache introuvable');
+    }
+
+    const nextStatus = this.normalizeTaskStatus(dto.statut);
+    const currentStatus = this.normalizeStoredStatus(task.statut);
+
+    this.assertStatusTransition({
+      currentStatus,
+      nextStatus,
+      role: effectiveRole,
+    });
+
+    const updated = await this.prisma.club_taches.update({
+      where: { id: taskId },
+      data: { statut: nextStatus },
+      include: this.taskInclude,
+    });
+
+    return {
+      ...updated,
+      statut: this.normalizeStoredStatus(updated.statut),
+    };
   }
 
   async remove(userId: string, clubId: string, taskId: string) {

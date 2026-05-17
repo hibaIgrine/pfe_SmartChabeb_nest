@@ -1138,6 +1138,32 @@ export class ClubsService {
     });
   }
 
+  async findMyStaffClubs(userId: string) {
+    return await this.prisma.club_staff.findMany({
+      where: {
+        id_utilisateur: userId,
+        is_active: true,
+      },
+      include: {
+        club: {
+          select: {
+            id: true,
+            nom: true,
+            logo_url: true,
+            categorie: true,
+            description: true,
+            locale_fixe: true,
+          },
+        },
+      },
+      orderBy: {
+        club: {
+          nom: 'asc',
+        },
+      },
+    });
+  }
+
   // ==========================================
   // LOGIQUE : Staff & Suspension
   // ==========================================
