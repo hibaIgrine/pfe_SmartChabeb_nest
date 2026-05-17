@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 
@@ -81,6 +82,14 @@ type ClubCreationDecisionPayload = {
   reviewedBy?: string;
 };
 
+type ClubTaskNotificationPayload = {
+  utilisateurId: string;
+  type: 'TASK_ASSIGNED' | 'TASK_UPDATED' | 'TASK_COMPLETED' | 'TASK_REMINDER';
+  titre: string;
+  message: string;
+  data?: Record<string, unknown>;
+};
+
 type PostReactionNotificationPayload = {
   utilisateurId: string;
   postId: string;
@@ -125,6 +134,27 @@ type PostCommentMentionNotificationPayload = {
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async createClubTaskNotification(payload: ClubTaskNotificationPayload) {
+    return this.prisma.notifications.create({
+      data: {
+        id_utilisateur: payload.utilisateurId,
+        type: payload.type,
+        titre: payload.titre,
+        message: payload.message,
+        data: payload.data as Prisma.InputJsonValue | undefined,
+      },
+      select: {
+        id: true,
+        titre: true,
+        message: true,
+        type: true,
+        is_read: true,
+        created_at: true,
+        data: true,
+      },
+    });
+  }
 
   async createPostCommentNotification(payload: PostCommentNotificationPayload) {
     return this.prisma.notifications.create({
@@ -376,6 +406,84 @@ export class NotificationsService {
     }
   }
 
+  private async createUpcomingTaskReminders(utilisateurId: string) {
+    const now = new Date();
+    const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    const upcomingTasks = await this.prisma.club_taches.findMany({
+      where: {
+        date_limite: {
+          gt: now,
+          lte: next24Hours,
+        },
+        statut: {
+          in: ['EN_ATTENTE', 'EN_COURS', 'A_FAIRE'],
+        },
+        OR: [
+          { id_createur: utilisateurId },
+          {
+            affectations: {
+              some: { id_utilisateur: utilisateurId },
+            },
+          },
+        ],
+      },
+      select: {
+        id: true,
+        titre: true,
+        date_limite: true,
+        club: {
+          select: {
+            id: true,
+            nom: true,
+          },
+        },
+      },
+      orderBy: {
+        date_limite: 'asc',
+      },
+      take: 20,
+    });
+
+    for (const task of upcomingTasks) {
+      const existingReminder = await this.prisma.notifications.findFirst({
+        where: {
+          id_utilisateur: utilisateurId,
+          type: 'TASK_REMINDER',
+          data: {
+            path: ['taskId'],
+            equals: task.id,
+          },
+        },
+        select: { id: true },
+      });
+
+      if (existingReminder) {
+        continue;
+      }
+
+      const dateLabel = this.formatDate(task.date_limite);
+      const timeLabel = this.formatTime(task.date_limite);
+
+      await this.prisma.notifications.create({
+        data: {
+          id_utilisateur: utilisateurId,
+          type: 'TASK_REMINDER',
+          titre: 'Echeance de tache proche',
+          message: `Rappel: la tache ${task.titre}${task.club?.nom ? ` (${task.club.nom})` : ''} arrive a echeance le ${dateLabel} a ${timeLabel}.`,
+          data: {
+            taskId: task.id,
+            taskTitle: task.titre,
+            clubId: task.club?.id,
+            clubNom: task.club?.nom,
+            dateLimite: task.date_limite.toISOString(),
+            reminderWindow: '24H',
+          },
+        },
+      });
+    }
+  }
+
   private formatTime(date: Date) {
     return date.toLocaleTimeString('fr-FR', {
       hour: '2-digit',
@@ -614,6 +722,7 @@ export class NotificationsService {
 
   async getMyNotifications(utilisateurId: string, limit = 20) {
     await this.createUpcomingEventReminders(utilisateurId);
+    await this.createUpcomingTaskReminders(utilisateurId);
 
     const safeLimit = Math.min(Math.max(limit, 1), 100);
 
@@ -635,6 +744,7 @@ export class NotificationsService {
 
   async getMyUnreadCount(utilisateurId: string) {
     await this.createUpcomingEventReminders(utilisateurId);
+    await this.createUpcomingTaskReminders(utilisateurId);
 
     const count = await this.prisma.notifications.count({
       where: { id_utilisateur: utilisateurId, is_read: false },

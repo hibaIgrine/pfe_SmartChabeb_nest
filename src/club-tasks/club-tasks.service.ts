@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { NotificationsService } from 'src/notifications/notifications.service';
 import { CreateClubTaskDto } from './dto/create-club-task.dto';
 import { UpdateClubTaskDto } from './dto/update-club-task.dto';
 import { UpdateClubTaskStatusDto } from './dto/update-club-task-status.dto';
@@ -19,9 +20,18 @@ type TaskStatus =
 
 @Injectable()
 export class ClubTasksService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private readonly taskInclude = {
+    club: {
+      select: {
+        id: true,
+        nom: true,
+      },
+    },
     createur: {
       select: {
         id: true,
@@ -43,6 +53,29 @@ export class ClubTasksService {
       },
     },
   };
+
+  private async getUserFullName(userId: string) {
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { id: userId },
+      select: { nom: true, prenom: true },
+    });
+
+    if (!user) {
+      return 'Utilisateur inconnu';
+    }
+
+    return `${user.prenom} ${user.nom}`.trim();
+  }
+
+  private async safeCreateTaskNotification(
+    payload: Parameters<NotificationsService['createClubTaskNotification']>[0],
+  ) {
+    try {
+      await this.notificationsService.createClubTaskNotification(payload);
+    } catch (err) {
+      console.error('Erreur creation notification tache :', err);
+    }
+  }
 
   private async getTaskOrThrow(taskId: string, clubId: string) {
     const task = await this.prisma.club_taches.findFirst({
@@ -364,7 +397,10 @@ export class ClubTasksService {
     affectationData: { utilisateurs: string[] },
   ) {
     await this.assertCanManageClub(userId, clubId);
-    await this.getTaskOrThrow(taskId, clubId);
+    const taskBefore = await this.getTaskWithRelationsOrThrow(taskId, clubId);
+    const existingAssigneeIds = taskBefore.affectations.map(
+      (affectation) => affectation.utilisateur.id,
+    );
 
     await this.prisma.club_tache_affectations.deleteMany({
       where: { id_tache: taskId },
@@ -378,12 +414,76 @@ export class ClubTasksService {
       return { message: 'Aucune affectation ajoutee' };
     }
 
-    return await this.prisma.club_tache_affectations.createMany({
+    await this.prisma.club_tache_affectations.createMany({
       data: utilisateurs.map((utilisateurId) => ({
         id_tache: taskId,
         id_utilisateur: utilisateurId,
       })),
     });
+
+    const refreshedTask = await this.getTaskWithRelationsOrThrow(
+      taskId,
+      clubId,
+    );
+    const actorName = await this.getUserFullName(userId);
+    const currentAssignees = refreshedTask.affectations.map((affectation) => ({
+      id: affectation.utilisateur.id,
+      name: `${affectation.utilisateur.prenom} ${affectation.utilisateur.nom}`.trim(),
+    }));
+    const assigneeNames = currentAssignees
+      .map((assignee) => assignee.name)
+      .join(', ');
+    const isInitialAssignment = existingAssigneeIds.length === 0;
+    const creatorId = refreshedTask.createur?.id;
+    const creatorShouldReceive =
+      creatorId &&
+      !currentAssignees.some((assignee) => assignee.id === creatorId);
+    const title = isInitialAssignment
+      ? 'Nouvelle tache affectee'
+      : 'Affectation de tache mise a jour';
+    const message = isInitialAssignment
+      ? `La tache ${refreshedTask.titre}${refreshedTask.club?.nom ? ` (${refreshedTask.club.nom})` : ''} a ete affectee a ${assigneeNames} par ${actorName}.`
+      : `L'affectation de la tache ${refreshedTask.titre}${refreshedTask.club?.nom ? ` (${refreshedTask.club.nom})` : ''} a ete mise a jour par ${actorName}. Nouveaux membres affectes: ${assigneeNames}.`;
+
+    await Promise.all(
+      currentAssignees.map((assignee) =>
+        this.safeCreateTaskNotification({
+          utilisateurId: assignee.id,
+          type: 'TASK_ASSIGNED',
+          titre: title,
+          message,
+          data: {
+            taskId: refreshedTask.id,
+            taskTitle: refreshedTask.titre,
+            clubId: refreshedTask.club?.id ?? clubId,
+            clubNom: refreshedTask.club?.nom ?? null,
+            assignedById: userId,
+            assignedByNomComplet: actorName,
+            dateLimite: refreshedTask.date_limite.toISOString(),
+          },
+        }),
+      ),
+    );
+
+    if (creatorShouldReceive && creatorId) {
+      await this.safeCreateTaskNotification({
+        utilisateurId: creatorId,
+        type: 'TASK_ASSIGNED',
+        titre: title,
+        message,
+        data: {
+          taskId: refreshedTask.id,
+          taskTitle: refreshedTask.titre,
+          clubId: refreshedTask.club?.id ?? clubId,
+          clubNom: refreshedTask.club?.nom ?? null,
+          assignedById: userId,
+          assignedByNomComplet: actorName,
+          dateLimite: refreshedTask.date_limite.toISOString(),
+        },
+      });
+    }
+
+    return { message: 'Tâche affectée avec succès' };
   }
 
   async reaffecterTask(
@@ -392,40 +492,7 @@ export class ClubTasksService {
     taskId: string,
     affectationData: { utilisateurs: string[] },
   ) {
-    await this.assertCanManageClub(userId, clubId);
-    await this.getTaskOrThrow(taskId, clubId);
-
-    const affectationsActuelles =
-      await this.prisma.club_tache_affectations.findMany({
-        where: { id_tache: taskId },
-      });
-
-    const idsActuels = affectationsActuelles.map((a) => a.id_utilisateur);
-    const idsNouveaux = Array.isArray(affectationData.utilisateurs)
-      ? affectationData.utilisateurs
-      : [];
-    const idsASupprimer = idsActuels.filter((id) => !idsNouveaux.includes(id));
-
-    if (idsASupprimer.length > 0) {
-      await this.prisma.club_tache_affectations.deleteMany({
-        where: {
-          id_tache: taskId,
-          id_utilisateur: { in: idsASupprimer },
-        },
-      });
-    }
-
-    const idsAAjouter = idsNouveaux.filter((id) => !idsActuels.includes(id));
-    if (idsAAjouter.length > 0) {
-      await this.prisma.club_tache_affectations.createMany({
-        data: idsAAjouter.map((utilisateurId) => ({
-          id_tache: taskId,
-          id_utilisateur: utilisateurId,
-        })),
-      });
-    }
-
-    return { message: 'Tâche réaffectée avec succès' };
+    return await this.affecterTask(userId, clubId, taskId, affectationData);
   }
 
   async update(
@@ -435,7 +502,7 @@ export class ClubTasksService {
     dto: UpdateClubTaskDto,
   ) {
     await this.assertCanManageClub(userId, clubId);
-    await this.getTaskOrThrow(taskId, clubId);
+    const taskBefore = await this.getTaskWithRelationsOrThrow(taskId, clubId);
 
     const data: {
       titre?: string;
@@ -444,6 +511,7 @@ export class ClubTasksService {
       date_limite?: Date;
       type_tache?: string;
     } = {};
+    const changes: string[] = [];
 
     if (dto.titre !== undefined) {
       const titre = dto.titre.trim();
@@ -451,18 +519,34 @@ export class ClubTasksService {
         throw new BadRequestException('Le titre est obligatoire');
       }
       data.titre = titre;
+      if (titre !== taskBefore.titre) {
+        changes.push('titre');
+      }
     }
 
     if (dto.description !== undefined) {
-      data.description = dto.description.trim() || null;
+      const description = dto.description.trim() || null;
+      data.description = description;
+      const previousDescription = taskBefore.description || null;
+      if (description !== previousDescription) {
+        changes.push('description');
+      }
     }
 
     if (dto.priorite !== undefined) {
-      data.priorite = this.normalizePriority(dto.priorite);
+      const priorite = this.normalizePriority(dto.priorite);
+      data.priorite = priorite;
+      if (priorite !== taskBefore.priorite) {
+        changes.push('priorite');
+      }
     }
 
     if (dto.date_limite !== undefined) {
-      data.date_limite = this.normalizeDateLimite(dto.date_limite);
+      const dateLimite = this.normalizeDateLimite(dto.date_limite);
+      data.date_limite = dateLimite;
+      if (dateLimite.getTime() !== taskBefore.date_limite.getTime()) {
+        changes.push('date limite');
+      }
     }
 
     if (dto.type_tache !== undefined) {
@@ -471,6 +555,9 @@ export class ClubTasksService {
         throw new BadRequestException('Le type de tache est obligatoire');
       }
       data.type_tache = typeTache;
+      if (typeTache !== taskBefore.type_tache) {
+        changes.push('type de tache');
+      }
     }
 
     if (Object.keys(data).length > 0) {
@@ -484,9 +571,99 @@ export class ClubTasksService {
       await this.affecterTask(userId, clubId, taskId, {
         utilisateurs: dto.utilisateurs,
       });
+
+      const updatedTask = await this.getTaskWithRelationsOrThrow(
+        taskId,
+        clubId,
+      );
+      const actorName = await this.getUserFullName(userId);
+      const recipientMap = new Map<string, string>();
+
+      if (updatedTask.createur?.id) {
+        recipientMap.set(
+          updatedTask.createur.id,
+          `${updatedTask.createur.prenom} ${updatedTask.createur.nom}`.trim(),
+        );
+      }
+
+      updatedTask.affectations.forEach((affectation) => {
+        recipientMap.set(
+          affectation.utilisateur.id,
+          `${affectation.utilisateur.prenom} ${affectation.utilisateur.nom}`.trim(),
+        );
+      });
+
+      if (changes.length > 0) {
+        const changeLabel = changes.join(', ');
+        await Promise.all(
+          Array.from(recipientMap.entries()).map(([recipientId]) =>
+            this.safeCreateTaskNotification({
+              utilisateurId: recipientId,
+              type: 'TASK_UPDATED',
+              titre: 'Tache modifiee',
+              message: `La tache ${updatedTask.titre}${updatedTask.club?.nom ? ` (${updatedTask.club.nom})` : ''} a ete modifiee: ${changeLabel}.`,
+              data: {
+                taskId: updatedTask.id,
+                taskTitle: updatedTask.titre,
+                clubId: updatedTask.club?.id ?? clubId,
+                clubNom: updatedTask.club?.nom ?? null,
+                changes,
+                updatedById: userId,
+                updatedByNomComplet: actorName,
+                dateLimite: updatedTask.date_limite.toISOString(),
+              },
+            }),
+          ),
+        );
+      }
+
+      return updatedTask;
     }
 
-    return await this.getTaskWithRelationsOrThrow(taskId, clubId);
+    const updatedTask = await this.getTaskWithRelationsOrThrow(taskId, clubId);
+    const actorName = await this.getUserFullName(userId);
+
+    if (changes.length > 0) {
+      const recipientMap = new Map<string, string>();
+
+      if (updatedTask.createur?.id) {
+        recipientMap.set(
+          updatedTask.createur.id,
+          `${updatedTask.createur.prenom} ${updatedTask.createur.nom}`.trim(),
+        );
+      }
+
+      updatedTask.affectations.forEach((affectation) => {
+        recipientMap.set(
+          affectation.utilisateur.id,
+          `${affectation.utilisateur.prenom} ${affectation.utilisateur.nom}`.trim(),
+        );
+      });
+
+      const changeLabel = changes.join(', ');
+      await Promise.all(
+        Array.from(recipientMap.entries()).map(([recipientId]) =>
+          this.safeCreateTaskNotification({
+            utilisateurId: recipientId,
+            type: 'TASK_UPDATED',
+            titre: 'Tache modifiee',
+            message: `La tache ${updatedTask.titre}${updatedTask.club?.nom ? ` (${updatedTask.club.nom})` : ''} a ete modifiee: ${changeLabel}.`,
+            data: {
+              taskId: updatedTask.id,
+              taskTitle: updatedTask.titre,
+              clubId: updatedTask.club?.id ?? clubId,
+              clubNom: updatedTask.club?.nom ?? null,
+              changes,
+              updatedById: userId,
+              updatedByNomComplet: actorName,
+              dateLimite: updatedTask.date_limite.toISOString(),
+            },
+          }),
+        ),
+      );
+    }
+
+    return updatedTask;
   }
 
   async updateStatus(
@@ -534,6 +711,48 @@ export class ClubTasksService {
       data: { statut: nextStatus },
       include: this.taskInclude,
     });
+
+    if (nextStatus === 'TERMINE') {
+      const actorName = await this.getUserFullName(userId);
+      const recipients = new Map<string, string>();
+
+      if (updated.createur?.id && updated.createur.id !== userId) {
+        recipients.set(
+          updated.createur.id,
+          `${updated.createur.prenom} ${updated.createur.nom}`.trim(),
+        );
+      }
+
+      updated.affectations.forEach((affectation) => {
+        const assigneeId = affectation.utilisateur.id;
+        if (assigneeId !== userId) {
+          recipients.set(
+            assigneeId,
+            `${affectation.utilisateur.prenom} ${affectation.utilisateur.nom}`.trim(),
+          );
+        }
+      });
+
+      await Promise.all(
+        Array.from(recipients.entries()).map(([recipientId]) =>
+          this.safeCreateTaskNotification({
+            utilisateurId: recipientId,
+            type: 'TASK_COMPLETED',
+            titre: 'Tache terminee',
+            message: `La tache ${updated.titre}${updated.club?.nom ? ` (${updated.club.nom})` : ''} a ete marquee terminee par ${actorName}.`,
+            data: {
+              taskId: updated.id,
+              taskTitle: updated.titre,
+              clubId: updated.club?.id ?? clubId,
+              clubNom: updated.club?.nom ?? null,
+              completedById: userId,
+              completedByNomComplet: actorName,
+              dateLimite: updated.date_limite.toISOString(),
+            },
+          }),
+        ),
+      );
+    }
 
     return {
       ...updated,
