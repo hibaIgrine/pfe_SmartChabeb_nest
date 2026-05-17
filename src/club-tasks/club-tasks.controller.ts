@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -13,6 +14,7 @@ import { Roles } from 'src/auth/roles.decorator';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { ClubTasksService } from './club-tasks.service';
 import { CreateClubTaskDto } from './dto/create-club-task.dto';
+import { UpdateClubTaskDto } from './dto/update-club-task.dto';
 
 @Controller('clubs/:clubId/tasks')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -41,7 +43,12 @@ export class ClubTasksController {
     @Request() req: any,
     @Body() affectationData: { utilisateurs: string[] },
   ) {
-    return await this.clubTasksService.affecterTask(req.user.userId, clubId, taskId, affectationData);
+    return await this.clubTasksService.affecterTask(
+      req.user.userId,
+      clubId,
+      taskId,
+      affectationData,
+    );
   }
 
   @Patch(':taskId/reaffecter')
@@ -51,11 +58,40 @@ export class ClubTasksController {
     @Request() req: any,
     @Body() affectationData: { utilisateurs: string[] },
   ) {
-    return await this.clubTasksService.reaffecterTask(req.user.userId, clubId, taskId, affectationData);
+    return await this.clubTasksService.reaffecterTask(
+      req.user.userId,
+      clubId,
+      taskId,
+      affectationData,
+    );
   }
 
   @Get('staff')
   async getClubStaff(@Param('clubId') clubId: string, @Request() req: any) {
     return await this.clubTasksService.getClubStaff(req.user.userId, clubId);
+  }
+
+  @Patch(':taskId')
+  async update(
+    @Param('clubId') clubId: string,
+    @Param('taskId') taskId: string,
+    @Request() req: any,
+    @Body() dto: UpdateClubTaskDto,
+  ) {
+    return await this.clubTasksService.update(
+      req.user.userId,
+      clubId,
+      taskId,
+      dto,
+    );
+  }
+
+  @Delete(':taskId')
+  async remove(
+    @Param('clubId') clubId: string,
+    @Param('taskId') taskId: string,
+    @Request() req: any,
+  ) {
+    return await this.clubTasksService.remove(req.user.userId, clubId, taskId);
   }
 }
