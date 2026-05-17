@@ -754,6 +754,54 @@ export class ClubTasksService {
       );
     }
 
+    // If a manager validated or refused a task (transition TERMINE -> VALIDEE|REFUSE),
+    // notify all assigned staff about the decision.
+    if (isManager && (nextStatus === 'VALIDEE' || nextStatus === 'REFUSE')) {
+      const actorName = await this.getUserFullName(userId);
+      const decision = nextStatus === 'VALIDEE' ? 'validee' : 'refusee';
+
+      const assigneeRecipients: Array<{ id: string; name: string }> = [];
+      updated.affectations.forEach((affectation) => {
+        const assigneeId = affectation.utilisateur.id;
+        if (assigneeId !== userId) {
+          assigneeRecipients.push({
+            id: assigneeId,
+            name: `${affectation.utilisateur.prenom} ${affectation.utilisateur.nom}`.trim(),
+          });
+        }
+      });
+
+      if (assigneeRecipients.length > 0) {
+        const title =
+          nextStatus === 'VALIDEE' ? 'Tache validee' : 'Tache refusee';
+        const message =
+          nextStatus === 'VALIDEE'
+            ? `La tache ${updated.titre}${updated.club?.nom ? ` (${updated.club.nom})` : ''} a ete validee par ${actorName}.`
+            : `La tache ${updated.titre}${updated.club?.nom ? ` (${updated.club.nom})` : ''} a ete refusee par ${actorName}.`;
+
+        await Promise.all(
+          assigneeRecipients.map((recipient) =>
+            this.safeCreateTaskNotification({
+              utilisateurId: recipient.id,
+              type: 'TASK_UPDATED',
+              titre: title,
+              message,
+              data: {
+                taskId: updated.id,
+                taskTitle: updated.titre,
+                clubId: updated.club?.id ?? clubId,
+                clubNom: updated.club?.nom ?? null,
+                decision: nextStatus,
+                decidedById: userId,
+                decidedByNomComplet: actorName,
+                dateLimite: updated.date_limite.toISOString(),
+              },
+            }),
+          ),
+        );
+      }
+    }
+
     return {
       ...updated,
       statut: this.normalizeStoredStatus(updated.statut),
