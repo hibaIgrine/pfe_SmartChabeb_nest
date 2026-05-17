@@ -190,7 +190,7 @@ model club_taches {
   titre        String   @db.VarChar(120)
   description  String?  @db.Text
   priorite     String   @db.VarChar(20)
-  date_limite  DateTime @db.Date
+  date_limite  DateTime @db.Timestamp(6)
   type_tache   String   @db.VarChar(80)
   statut       String   @default("A_FAIRE") @db.VarChar(20)
   created_at   DateTime @default(now())
