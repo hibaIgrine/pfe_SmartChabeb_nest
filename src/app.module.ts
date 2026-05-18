@@ -25,6 +25,7 @@ import { EtablissementsModule } from './etablissements/etablissements.module';
 import { CertificatesModule } from './certificates/certificates.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ClubTasksModule } from './club-tasks/club-tasks.module';
+import { UploadsModule } from './uploads/uploads.module';
 
 import { RecommendationsModule } from './recommendations/recommendations.module';
 import { SessionsModule } from './sessions/sessions.module';
@@ -76,6 +77,7 @@ import { ChatbotModule } from './chatbot/chatbot.module';
     CertificatesModule,
     PaymentsModule,
     ClubTasksModule,
+    UploadsModule,
     SessionsModule,
     RecommendationsModule,
     ChatbotModule,

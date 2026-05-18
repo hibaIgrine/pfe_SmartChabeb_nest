@@ -105,6 +105,22 @@ export class ClubTasksController {
     );
   }
 
+  @Post(':taskId/status')
+  async updateStatusPost(
+    @Param('clubId') clubId: string,
+    @Param('taskId') taskId: string,
+    @Request() req: any,
+    @Body() dto: UpdateClubTaskStatusDto,
+  ) {
+    return await this.clubTasksService.updateStatus(
+      req.user.userId,
+      req.user.role,
+      clubId,
+      taskId,
+      dto,
+    );
+  }
+
   @Patch(':taskId')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE', 'ADMIN')

@@ -45,6 +45,7 @@ model utilisateurs {
   clubs_diriges                 clubs[]                     @relation("coach_club")
   comments                      comments[]
   commentaires_taches           club_tache_commentaires[]   @relation("club_task_comment_author")
+  preuves_taches                club_tache_preuves[]        @relation("club_task_proof_author")
   conversation_participations   conversation_participants[]
   conversations_created         conversations[]             @relation("conversation_creator")
   demandes_creation_clubs       demandes_creation_clubs[]
@@ -160,6 +161,7 @@ model club_taches {
   id_createur  String?                   @db.Uuid
   affectations club_tache_affectations[]
   commentaires club_tache_commentaires[]
+  preuves       club_tache_preuves[]
   club         clubs                     @relation(fields: [id_club], references: [id], onDelete: Cascade)
   createur     utilisateurs?             @relation("club_task_creator", fields: [id_createur], references: [id])
 
@@ -191,6 +193,23 @@ model club_tache_commentaires {
   updated_at     DateTime     @updatedAt
   tache         club_taches  @relation(fields: [id_tache], references: [id], onDelete: Cascade)
   utilisateur   utilisateurs @relation("club_task_comment_author", fields: [id_utilisateur], references: [id], onDelete: Cascade)
+
+  @@index([id_tache, created_at])
+  @@index([id_utilisateur, created_at])
+}
+
+model club_tache_preuves {
+  id              String       @id @default(uuid()) @db.Uuid
+  id_tache        String       @db.Uuid
+  id_utilisateur  String       @db.Uuid
+  url             String       @db.VarChar(255)
+  type            String?      @db.VarChar(50)
+  filename        String?      @db.VarChar(255)
+  created_at      DateTime     @default(now()) @db.Timestamp(6)
+  updated_at      DateTime     @updatedAt
+
+  tache           club_taches  @relation(fields: [id_tache], references: [id], onDelete: Cascade)
+  utilisateur     utilisateurs @relation("club_task_proof_author", fields: [id_utilisateur], references: [id], onDelete: Cascade)
 
   @@index([id_tache, created_at])
   @@index([id_utilisateur, created_at])

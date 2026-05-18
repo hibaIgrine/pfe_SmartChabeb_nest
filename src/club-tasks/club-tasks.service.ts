@@ -64,6 +64,18 @@ export class ClubTasksService {
         },
       },
     },
+    preuves: {
+      include: {
+        utilisateur: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            photo_profil_url: true,
+          },
+        },
+      },
+    },
   };
 
   private async getUserFullName(userId: string) {
@@ -718,11 +730,65 @@ export class ClubTasksService {
       role: effectiveRole,
     });
 
-    const updated = await this.prisma.club_taches.update({
-      where: { id: taskId },
-      data: { statut: nextStatus },
-      include: this.taskInclude,
-    });
+    let updated: any = task;
+
+    // If a staff (non-manager) marks task as TERMINE, require proofs and persist them atomically.
+    if (nextStatus === 'TERMINE' && !isManager) {
+      const proofs = (dto as any).proofs as
+        | Array<{ url: string; type?: string; filename?: string }>
+        | undefined;
+      const validProofs = (proofs || []).filter(
+        (proof) =>
+          typeof proof?.url === 'string' && proof.url.trim().length > 0,
+      );
+
+      console.log('[club-tasks][updateStatus]', {
+        taskId,
+        clubId,
+        userId,
+        role: effectiveRole,
+        nextStatus,
+        proofsReceived: Array.isArray(proofs) ? proofs.length : null,
+        validProofs: validProofs.length,
+        dtoKeys: dto ? Object.keys(dto as Record<string, any>) : [],
+      });
+
+      if (!validProofs.length) {
+        throw new BadRequestException(
+          'Une preuve (photo ou document) est requise pour marquer la tache comme terminee',
+        );
+      }
+
+      if (proofs && validProofs.length !== proofs.length) {
+        throw new BadRequestException(
+          'Chaque preuve doit contenir une url valide',
+        );
+      }
+
+      updated = await this.prisma.$transaction(async (tx) => {
+        await tx.club_tache_preuves.createMany({
+          data: validProofs.map((p) => ({
+            id_tache: taskId,
+            id_utilisateur: userId,
+            url: p.url.trim(),
+            type: p.type ?? null,
+            filename: p.filename ?? null,
+          })),
+        });
+
+        return await tx.club_taches.update({
+          where: { id: taskId },
+          data: { statut: nextStatus },
+          include: this.taskInclude,
+        });
+      });
+    } else {
+      updated = await this.prisma.club_taches.update({
+        where: { id: taskId },
+        data: { statut: nextStatus },
+        include: this.taskInclude,
+      });
+    }
 
     if (nextStatus === 'TERMINE') {
       const actorName = await this.getUserFullName(userId);
