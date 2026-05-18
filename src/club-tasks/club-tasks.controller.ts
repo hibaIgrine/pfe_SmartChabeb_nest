@@ -132,4 +132,32 @@ export class ClubTasksController {
   ) {
     return await this.clubTasksService.remove(req.user.userId, clubId, taskId);
   }
+
+  @Get(':taskId/comments')
+  async listComments(
+    @Param('clubId') clubId: string,
+    @Param('taskId') taskId: string,
+    @Request() req: any,
+  ) {
+    return await this.clubTasksService.listComments(
+      req.user.userId,
+      clubId,
+      taskId,
+    );
+  }
+
+  @Post(':taskId/comments')
+  async createComment(
+    @Param('clubId') clubId: string,
+    @Param('taskId') taskId: string,
+    @Request() req: any,
+    @Body() body: { message: string },
+  ) {
+    return await this.clubTasksService.createComment(
+      req.user.userId,
+      clubId,
+      taskId,
+      body.message,
+    );
+  }
 }

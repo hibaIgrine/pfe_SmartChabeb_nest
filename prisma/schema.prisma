@@ -7,80 +7,705 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ==========================================
-// 1. MODULE AUTHENTIFICATION & RÔLES
-// ==========================================
-
 model roles {
   id           String         @id @default(uuid()) @db.Uuid
   nom          String         @unique @db.VarChar(50)
-  description  String?        @db.Text
+  description  String?
   utilisateurs utilisateurs[]
 }
 
 model utilisateurs {
-  id                  String    @id @default(uuid()) @db.Uuid
-  nom                 String    @db.VarChar(100)
-  prenom              String    @db.VarChar(100)
-  email               String    @unique @db.VarChar(255)
-  mot_de_passe        String?   @db.VarChar(255)
-  role                String    @db.VarChar(50)
-  genre               String?   @db.VarChar(10)
-  date_naissance      DateTime? @db.Date
-  photo_profil_url    String?   @db.VarChar(255)
-  compte_actif        Boolean?  @default(true)
-  est_verifie         Boolean?  @default(false)
-  date_fin_ban        DateTime?
-  motif_ban           String?   @db.VarChar(255)
-  bio                 String?   @db.Text
-  lieu_habite         String?   @db.VarChar(255)
-  etablissement_etude String?   @db.VarChar(255)
-  code_verification   String?   @db.VarChar(6)
-  reset_token         String?   @db.VarChar(6)
-  reset_token_expires DateTime?
-  points              Int       @default(0)
-  is_online           Boolean   @default(false)
-  last_seen_at        DateTime?
-
-  // Relations
-  id_role  String? @db.Uuid
-  role_obj roles?  @relation(fields: [id_role], references: [id], onDelete: SetNull)
-
-  id_centre String?  @db.Uuid // 💡 Renommé
-  centre    centres? @relation(fields: [id_centre], references: [id], onDelete: SetNull)
-
-  clubs_diriges                 clubs[]                     @relation("coach_club")
-  inscriptions_clubs            inscriptions_clubs[]
+  id                            String                      @id @default(uuid()) @db.Uuid
+  nom                           String                      @db.VarChar(100)
+  prenom                        String                      @db.VarChar(100)
+  email                         String                      @unique @db.VarChar(255)
+  mot_de_passe                  String?                     @db.VarChar(255)
+  role                          String                      @db.VarChar(50)
+  genre                         String?                     @db.VarChar(10)
+  date_naissance                DateTime?                   @db.Date
+  photo_profil_url              String?                     @db.VarChar(255)
+  compte_actif                  Boolean?                    @default(true)
+  est_verifie                   Boolean?                    @default(false)
+  date_fin_ban                  DateTime?
+  motif_ban                     String?                     @db.VarChar(255)
+  bio                           String?
+  code_verification             String?                     @db.VarChar(6)
+  reset_token                   String?                     @db.VarChar(6)
+  reset_token_expires           DateTime?
+  id_role                       String?                     @db.Uuid
+  id_centre                     String?                     @db.Uuid
+  points                        Int                         @default(0)
+  etablissement_etude           String?                     @db.VarChar(255)
+  lieu_habite                   String?                     @db.VarChar(255)
+  is_online                     Boolean                     @default(false)
+  last_seen_at                  DateTime?
   staff_dans_clubs              club_staff[]
-  reservations                  reservations_locaux[]
-  events_crees                  events[]                    @relation("event_creator")
-  event_participations          event_participants[]
-  event_feedbacks               eventFeedbacks[]
-  notifications                 notifications[]
-  posts                         posts[]
-  post_favorites                post_favorites[]
-  following_users               user_follows[]              @relation("user_following")
-  follower_users                user_follows[]              @relation("user_followers")
-  hidden_users                  user_hidden_users[]         @relation("user_hidden_author")
-  hidden_by_users               user_hidden_users[]         @relation("user_hidden_target")
-  hidden_from_posts             post_hidden_users[]         @relation("post_hidden_target")
-  comments                      comments[]
-  post_reactions                post_reactions[]
-  post_mentions_received        post_mentions[]             @relation("post_mentioned_user")
-  messages_sent                 messages[]                  @relation("message_sender")
-  pinned_messages               messages[]                  @relation("message_pinner")
-  conversations_created         conversations[]             @relation("conversation_creator")
-  conversation_participations   conversation_participants[]
-  presences_club                presences_clubs[]           @relation("presence_membre")
-  presences_marquees            presences_clubs[]           @relation("presence_responsable")
-  demandes_creation_clubs       demandes_creation_clubs[]
-  taches_creees                 club_taches[]              @relation("club_task_creator")
   taches_affectees              club_tache_affectations[]
+  taches_creees                 club_taches[]               @relation("club_task_creator")
+  clubs_diriges                 clubs[]                     @relation("coach_club")
+  comments                      comments[]
+  commentaires_taches           club_tache_commentaires[]   @relation("club_task_comment_author")
+  conversation_participations   conversation_participants[]
+  conversations_created         conversations[]             @relation("conversation_creator")
+  demandes_creation_clubs       demandes_creation_clubs[]
+  event_feedbacks               eventFeedbacks[]
+  event_participations          event_participants[]
+  events_crees                  events[]                    @relation("event_creator")
+  inscriptions_clubs            inscriptions_clubs[]
+  deleted_messages_for_me       message_deleted_for_users[]
+  deleted_messages_for_everyone messages[]                  @relation("message_deleted_for_everyone_by")
+  pinned_messages               messages[]                  @relation("message_pinner")
+  messages_sent                 messages[]                  @relation("message_sender")
+  notifications                 notifications[]
+  post_favorites                post_favorites[]
+  hidden_from_posts             post_hidden_users[]         @relation("post_hidden_target")
+  post_mentions_received        post_mentions[]             @relation("post_mentioned_user")
+  post_reactions                post_reactions[]
+  posts                         posts[]
+  presences_marquees            presences_clubs[]           @relation("presence_responsable")
+  presences_club                presences_clubs[]           @relation("presence_membre")
+  recommendation_sessions       recommendation_sessions[]
+  reservations                  reservations_locaux[]
   stories                       stories[]
   story_views                   story_views[]
-  deleted_messages_for_everyone messages[]                  @relation("message_deleted_for_everyone_by")
-  deleted_messages_for_me       message_deleted_for_users[]
-  recommendation_sessions       recommendation_sessions[]
+  follower_users                user_follows[]              @relation("user_followers")
+  following_users               user_follows[]              @relation("user_following")
+  hidden_by_users               user_hidden_users[]         @relation("user_hidden_target")
+  hidden_users                  user_hidden_users[]         @relation("user_hidden_author")
+  centre                        centres?                    @relation(fields: [id_centre], references: [id])
+  role_obj                      roles?                      @relation(fields: [id_role], references: [id])
+}
+
+model etablissements {
+  id         String   @id @default(uuid()) @db.Uuid
+  nom        String   @unique @db.VarChar(255)
+  created_at DateTime @default(now())
+
+  @@index([nom])
+}
+
+model centres {
+  id                      String                    @id @default(uuid()) @db.Uuid
+  nom                     String                    @unique @db.VarChar(100)
+  gouvernorat             String                    @db.VarChar(100)
+  delegation              String?                   @db.VarChar(100)
+  adresse                 String?                   @db.VarChar(255)
+  code_postal             String?                   @db.VarChar(10)
+  telephone_centre        String?                   @db.VarChar(20)
+  date_creation           DateTime?                 @default(now()) @db.Date
+  est_actif               Boolean                   @default(true)
+  clubs                   clubs[]
+  demandes_creation_clubs demandes_creation_clubs[]
+  inventaire              equipements[]
+  locaux                  locaux[]
+  utilisateurs            utilisateurs[]
+}
+
+model clubs {
+  id                      String                    @id @default(uuid()) @db.Uuid
+  nom                     String                    @db.VarChar(100)
+  description             String?
+  categorie               String                    @db.VarChar(50)
+  logo_url                String?                   @db.VarChar(255)
+  planning                Json?
+  capacite                Int?
+  locale_fixe             String?                   @db.VarChar(100)
+  id_centre               String                    @db.Uuid
+  id_coach                String?                   @db.Uuid
+  est_actif               Boolean                   @default(true)
+  staff                   club_staff[]
+  taches                  club_taches[]
+  centre                  centres                   @relation(fields: [id_centre], references: [id], onDelete: Cascade)
+  responsable             utilisateurs?             @relation("coach_club", fields: [id_coach], references: [id])
+  events                  events[]
+  inscriptions            inscriptions_clubs[]
+  presences               presences_clubs[]
+  recommendation_sessions recommendation_sessions[]
+  seances                 seances[]
+}
+
+model club_roles {
+  id          String       @id @default(uuid()) @db.Uuid
+  nom         String       @unique @db.VarChar(50)
+  description String?
+  is_active   Boolean      @default(true)
+  staff       club_staff[]
+}
+
+model club_staff {
+  id             String       @id @default(uuid()) @db.Uuid
+  id_club        String       @db.Uuid
+  id_utilisateur String       @db.Uuid
+  role_dans_club String       @db.VarChar(50)
+  id_club_role   String?      @db.Uuid
+  is_active      Boolean      @default(true)
+  club           clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)
+  club_role      club_roles?  @relation(fields: [id_club_role], references: [id])
+  utilisateur    utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
+
+  @@unique([id_club, id_utilisateur])
+}
+
+model club_taches {
+  id           String                    @id @default(uuid()) @db.Uuid
+  id_club      String                    @db.Uuid
+  titre        String                    @db.VarChar(120)
+  description  String?
+  priorite     String                    @db.VarChar(20)
+  date_limite  DateTime                  @db.Timestamp(6)
+  type_tache   String                    @db.VarChar(80)
+  statut       String                    @default("A_FAIRE") @db.VarChar(20)
+  created_at   DateTime                  @default(now())
+  updated_at   DateTime                  @updatedAt
+  id_createur  String?                   @db.Uuid
+  affectations club_tache_affectations[]
+  commentaires club_tache_commentaires[]
+  club         clubs                     @relation(fields: [id_club], references: [id], onDelete: Cascade)
+  createur     utilisateurs?             @relation("club_task_creator", fields: [id_createur], references: [id])
+
+  @@index([id_club, date_limite])
+  @@index([id_club, priorite])
+  @@index([id_club, statut])
+}
+
+model club_tache_affectations {
+  id               String       @id @default(uuid()) @db.Uuid
+  id_tache         String       @db.Uuid
+  id_utilisateur   String       @db.Uuid
+  date_affectation DateTime     @default(now()) @db.Timestamp(6)
+  statut           String       @default("EN_COURS") @db.VarChar(20)
+  tache            club_taches  @relation(fields: [id_tache], references: [id], onDelete: Cascade)
+  utilisateur      utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
+
+  @@unique([id_tache, id_utilisateur])
+  @@index([id_tache, statut])
+  @@index([id_utilisateur, statut])
+}
+
+model club_tache_commentaires {
+  id             String       @id @default(uuid()) @db.Uuid
+  id_tache       String       @db.Uuid
+  id_utilisateur  String       @db.Uuid
+  message        String       @db.Text
+  created_at     DateTime     @default(now()) @db.Timestamp(6)
+  updated_at     DateTime     @updatedAt
+  tache         club_taches  @relation(fields: [id_tache], references: [id], onDelete: Cascade)
+  utilisateur   utilisateurs @relation("club_task_comment_author", fields: [id_utilisateur], references: [id], onDelete: Cascade)
+
+  @@index([id_tache, created_at])
+  @@index([id_utilisateur, created_at])
+}
+
+model inscriptions_clubs {
+  id                  String       @id @default(uuid()) @db.Uuid
+  id_utilisateur      String       @db.Uuid
+  id_club             String       @db.Uuid
+  statut              String       @default("EN_ATTENTE")
+  date_adhesion       DateTime     @default(now()) @db.Timestamp(6)
+  date_validation     DateTime?    @db.Timestamp(6)
+  est_suspendu        Boolean      @default(false)
+  date_fin_suspension DateTime?
+  motif_suspension    String?
+  role_interne        String?      @default("MEMBRE")
+  responsable_id      String?      @db.Uuid
+  club                clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)
+  utilisateur         utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
+
+  @@unique([id_utilisateur, id_club])
+}
+
+model presences_clubs {
+  id             String       @id @default(uuid()) @db.Uuid
+  id_club        String       @db.Uuid
+  id_utilisateur String       @db.Uuid
+  id_responsable String       @db.Uuid
+  date_presence  DateTime     @db.Date
+  statut         String       @db.VarChar(10)
+  remarque       String?      @db.VarChar(255)
+  created_at     DateTime     @default(now())
+  updated_at     DateTime     @updatedAt
+  id_seance      String?      @db.Uuid
+  club           clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)
+  responsable    utilisateurs @relation("presence_responsable", fields: [id_responsable], references: [id])
+  seance         seances?     @relation(fields: [id_seance], references: [id], onDelete: Cascade)
+  membre         utilisateurs @relation("presence_membre", fields: [id_utilisateur], references: [id], onDelete: Cascade)
+
+  @@unique([id_club, id_utilisateur, id_seance])
+  @@index([id_club, date_presence])
+  @@index([id_utilisateur, date_presence])
+}
+
+model seances {
+  id          String            @id @default(uuid()) @db.Uuid
+  id_club     String            @db.Uuid
+  date_seance DateTime          @db.Date
+  titre       String?           @db.VarChar(255)
+  heure_debut DateTime?         @db.Timestamp(6)
+  heure_fin   DateTime?         @db.Timestamp(6)
+  created_by  String?           @db.Uuid
+  created_at  DateTime          @default(now())
+  presences   presences_clubs[]
+  club        clubs             @relation(fields: [id_club], references: [id], onDelete: Cascade)
+
+  @@index([id_club, date_seance])
+}
+
+model recommendation_sessions {
+  id                   Int                      @id @default(autoincrement())
+  id_club              String                   @db.Uuid
+  id_responsable       String?                  @db.Uuid
+  tranche_age          String                   @db.VarChar(50)
+  niveau               String                   @db.VarChar(50)
+  num_seance           Int
+  phase_annee          String                   @db.VarChar(80)
+  saison               String                   @db.VarChar(30)
+  mois                 Int
+  jour_semaine         String                   @db.VarChar(30)
+  format_seance        String                   @db.VarChar(80)
+  lieu                 String                   @db.VarChar(120)
+  duree_minutes        Int
+  activite_j_minus_2   String?                  @db.VarChar(120)
+  activite_precedente  String?                  @db.VarChar(120)
+  activite_actuelle    String                   @db.VarChar(120)
+  difficulte           String                   @db.VarChar(50)
+  niveau_fatigue       String                   @db.VarChar(50)
+  humeur_groupe        String                   @db.VarChar(50)
+  score_engagement     Float
+  nb_membres_total     Int
+  nb_presents          Int
+  taux_presence        Float
+  note_technique       Float
+  note_comportement    Float
+  evaluation_coach     String                   @db.VarChar(80)
+  progression_observee String                   @db.VarChar(80)
+  meteo                String                   @db.VarChar(50)
+  activite_exterieure  String                   @default("Non") @db.VarChar(20)
+  repetition_activite  Int                      @default(0)
+  sequence_logique     Int                      @default(1)
+  created_at           DateTime                 @default(now())
+  history              recommendation_history[]
+  club                 clubs                    @relation(fields: [id_club], references: [id], onDelete: Cascade)
+  responsable          utilisateurs?            @relation(fields: [id_responsable], references: [id])
+
+  @@index([id_club, created_at])
+  @@index([id_responsable, created_at])
+}
+
+model recommendation_history {
+  id               Int                     @id @default(autoincrement())
+  session_id       Int
+  recommandations  Json
+  modele_utilise   String                  @db.VarChar(120)
+  activite_choisie String?                 @db.VarChar(120)
+  created_at       DateTime                @default(now())
+  session          recommendation_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade)
+
+  @@index([session_id, created_at])
+}
+
+model locaux {
+  id                      String                    @id @default(uuid()) @db.Uuid
+  nom                     String                    @db.VarChar(100)
+  type                    String                    @db.VarChar(50)
+  capacite                Int?
+  localisation            String?
+  prix_heure              Decimal?                  @db.Decimal(10, 2)
+  description             String?
+  image_url               String?                   @db.VarChar(255)
+  est_actif               Boolean                   @default(true)
+  id_centre               String                    @db.Uuid
+  demandes_creation_clubs demandes_creation_clubs[]
+  events                  events[]
+  centre                  centres                   @relation(fields: [id_centre], references: [id], onDelete: Cascade)
+  reservations            reservations_locaux[]
+  equipements             room_equipment[]
+}
+
+model demandes_creation_clubs {
+  id                    String       @id @default(uuid()) @db.Uuid
+  nom_club              String       @db.VarChar(120)
+  categorie             String       @db.VarChar(80)
+  description           String?
+  planning_souhaite     Json?
+  statut                String       @default("EN_ATTENTE") @db.VarChar(20)
+  commentaire_decision  String?
+  cv_url                String?      @db.VarChar(255)
+  attestation_url       String?      @db.VarChar(255)
+  date_souhaitee        DateTime?    @db.Date
+  heure_debut_souhaitee DateTime?    @db.Timestamp(6)
+  heure_fin_souhaitee   DateTime?    @db.Timestamp(6)
+  created_at            DateTime     @default(now())
+  updated_at            DateTime     @updatedAt
+  id_demandeur          String       @db.Uuid
+  id_centre             String?      @db.Uuid
+  id_local_souhaite     String?      @db.Uuid
+  reviewed_by           String?      @db.Uuid
+  centre                centres?     @relation(fields: [id_centre], references: [id])
+  demandeur             utilisateurs @relation(fields: [id_demandeur], references: [id], onDelete: Cascade)
+  local_souhaite        locaux?      @relation(fields: [id_local_souhaite], references: [id])
+
+  @@index([id_demandeur, created_at])
+  @@index([statut, created_at])
+  @@index([id_centre, statut])
+  @@index([id_local_souhaite])
+}
+
+model equipements {
+  id          String           @id @default(uuid()) @db.Uuid
+  nom         String           @db.VarChar(100)
+  description String?
+  etat        String           @default("BON")
+  quantite    Int              @default(1)
+  id_centre   String           @db.Uuid
+  centre      centres          @relation(fields: [id_centre], references: [id], onDelete: Cascade)
+  locaux_lies room_equipment[]
+}
+
+model room_equipment {
+  id            String      @id @default(uuid()) @db.Uuid
+  id_local      String      @db.Uuid
+  id_equipement String      @db.Uuid
+  equipement    equipements @relation(fields: [id_equipement], references: [id], onDelete: Cascade)
+  local         locaux      @relation(fields: [id_local], references: [id], onDelete: Cascade)
+
+  @@unique([id_local, id_equipement])
+}
+
+model reservations_locaux {
+  id               String       @id @default(uuid()) @db.Uuid
+  date_reservation DateTime     @db.Date
+  heure_debut      DateTime     @db.Timestamp(6)
+  heure_fin        DateTime     @db.Timestamp(6)
+  objet            String       @db.VarChar(255)
+  statut           String       @default("EN_ATTENTE")
+  prix_total       Decimal?     @db.Decimal(10, 2)
+  date_creation    DateTime     @default(now())
+  id_utilisateur   String       @db.Uuid
+  id_local         String       @db.Uuid
+  payments         payments[]
+  local            locaux       @relation(fields: [id_local], references: [id], onDelete: Cascade)
+  utilisateur      utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
+}
+
+model payments {
+  id                String              @id @default(uuid()) @db.Uuid
+  reservation_id    String              @db.Uuid
+  amount            Decimal             @db.Decimal(10, 2)
+  status            String              @default("PENDING") @db.VarChar(20)
+  created_at        DateTime            @default(now())
+  updated_at        DateTime            @updatedAt
+  stripe_payment_id String?             @db.VarChar(255)
+  stripe_session_id String?             @db.VarChar(255)
+  reservation       reservations_locaux @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
+
+  @@index([reservation_id])
+}
+
+model events {
+  id                     String               @id @default(uuid()) @db.Uuid
+  nom                    String               @db.VarChar(120)
+  description            String?
+  date_event             DateTime             @db.Date
+  start_time             DateTime             @db.Timestamp(6)
+  end_time               DateTime             @db.Timestamp(6)
+  capacity               Int?
+  is_active              Boolean              @default(true)
+  created_at             DateTime             @default(now())
+  updated_at             DateTime             @updatedAt
+  club_id                String?              @db.Uuid
+  locaux_id              String               @db.Uuid
+  created_by             String               @db.Uuid
+  timeline               Json?
+  collaborating_club_ids String[]             @default([])
+  feedbacks              eventFeedbacks[]
+  participants           event_participants[]
+  club                   clubs?               @relation(fields: [club_id], references: [id])
+  createur               utilisateurs         @relation("event_creator", fields: [created_by], references: [id])
+  local                  locaux               @relation(fields: [locaux_id], references: [id])
+
+  @@index([date_event, is_active])
+  @@index([club_id])
+  @@index([locaux_id])
+}
+
+model event_participants {
+  id             String       @id @default(uuid()) @db.Uuid
+  status         String       @default("INVITED") @db.VarChar(20)
+  checkin        Boolean      @default(false)
+  created_at     DateTime     @default(now())
+  updated_at     DateTime     @updatedAt
+  event_id       String       @db.Uuid
+  user_id        String       @db.Uuid
+  points_awarded Boolean      @default(false)
+  event          events       @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user           utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([event_id, user_id])
+  @@index([user_id])
+}
+
+model eventFeedbacks {
+  id          String       @id @default(uuid()) @db.Uuid
+  note        Int
+  commentaire String?
+  created_at  DateTime     @default(now())
+  updated_at  DateTime     @updatedAt
+  event_id    String       @db.Uuid
+  user_id     String       @db.Uuid
+  event       events       @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  user        utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([event_id, user_id])
+  @@index([event_id])
+  @@index([user_id])
+  @@map("event_feedbacks")
+}
+
+model notifications {
+  id             String       @id @default(uuid()) @db.Uuid
+  titre          String       @db.VarChar(255)
+  message        String
+  type           String       @db.VarChar(50)
+  is_read        Boolean      @default(false)
+  data           Json?
+  created_at     DateTime     @default(now())
+  updated_at     DateTime     @updatedAt
+  id_utilisateur String       @db.Uuid
+  utilisateur    utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
+}
+
+model posts {
+  id           String              @id @default(uuid()) @db.Uuid
+  user_id      String              @db.Uuid
+  content      String
+  location     String?             @db.VarChar(255)
+  media        Json?
+  created_at   DateTime            @default(now())
+  updated_at   DateTime            @updatedAt
+  visibility   String              @default("PUBLIC") @db.VarChar(20)
+  comments     comments[]
+  favorites    post_favorites[]
+  hashtags     post_hashtags[]
+  hidden_users post_hidden_users[]
+  mentions     post_mentions[]
+  reactions    post_reactions[]
+  user         utilisateurs        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at])
+  @@index([created_at])
+}
+
+model post_hidden_users {
+  id             String       @id @default(uuid()) @db.Uuid
+  post_id        String       @db.Uuid
+  hidden_user_id String       @db.Uuid
+  created_at     DateTime     @default(now())
+  hidden_user    utilisateurs @relation("post_hidden_target", fields: [hidden_user_id], references: [id], onDelete: Cascade)
+  post           posts        @relation(fields: [post_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, hidden_user_id])
+  @@index([post_id])
+  @@index([hidden_user_id])
+}
+
+model user_follows {
+  id          String       @id @default(uuid()) @db.Uuid
+  follower_id String       @db.Uuid
+  followed_id String       @db.Uuid
+  created_at  DateTime     @default(now())
+  followed    utilisateurs @relation("user_followers", fields: [followed_id], references: [id], onDelete: Cascade)
+  follower    utilisateurs @relation("user_following", fields: [follower_id], references: [id], onDelete: Cascade)
+
+  @@unique([follower_id, followed_id])
+  @@index([follower_id, created_at])
+  @@index([followed_id, created_at])
+}
+
+model user_hidden_users {
+  id             String       @id @default(uuid()) @db.Uuid
+  user_id        String       @db.Uuid
+  hidden_user_id String       @db.Uuid
+  created_at     DateTime     @default(now())
+  hidden_user    utilisateurs @relation("user_hidden_target", fields: [hidden_user_id], references: [id], onDelete: Cascade)
+  user           utilisateurs @relation("user_hidden_author", fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, hidden_user_id])
+  @@index([user_id, created_at])
+  @@index([hidden_user_id])
+}
+
+model post_favorites {
+  id         String       @id @default(uuid()) @db.Uuid
+  post_id    String       @db.Uuid
+  user_id    String       @db.Uuid
+  created_at DateTime     @default(now())
+  post       posts        @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  user       utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, user_id])
+  @@index([post_id])
+  @@index([user_id, created_at])
+}
+
+model post_reactions {
+  id            String       @id @default(uuid()) @db.Uuid
+  post_id       String       @db.Uuid
+  user_id       String       @db.Uuid
+  reaction_type String       @db.VarChar(20)
+  created_at    DateTime     @default(now())
+  post          posts        @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  user          utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, user_id])
+  @@index([post_id])
+  @@index([user_id])
+}
+
+model post_hashtags {
+  id         String   @id @default(uuid()) @db.Uuid
+  post_id    String   @db.Uuid
+  hashtag    String   @db.VarChar(100)
+  created_at DateTime @default(now())
+  post       posts    @relation(fields: [post_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, hashtag])
+  @@index([hashtag])
+  @@index([post_id])
+}
+
+model post_mentions {
+  id                String       @id @default(uuid()) @db.Uuid
+  post_id           String       @db.Uuid
+  mentioned_user_id String       @db.Uuid
+  created_at        DateTime     @default(now())
+  mentioned_user    utilisateurs @relation("post_mentioned_user", fields: [mentioned_user_id], references: [id], onDelete: Cascade)
+  post              posts        @relation(fields: [post_id], references: [id], onDelete: Cascade)
+
+  @@unique([post_id, mentioned_user_id])
+  @@index([mentioned_user_id])
+  @@index([post_id])
+}
+
+model comments {
+  id         String       @id @default(uuid()) @db.Uuid
+  post_id    String       @db.Uuid
+  user_id    String       @db.Uuid
+  content    String
+  created_at DateTime     @default(now())
+  updated_at DateTime     @updatedAt
+  post       posts        @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  user       utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([post_id, created_at])
+  @@index([user_id])
+}
+
+model conversations {
+  id              String                      @id @default(uuid()) @db.Uuid
+  type            String                      @db.VarChar(20)
+  title           String?                     @db.VarChar(150)
+  created_by      String?                     @db.Uuid
+  created_at      DateTime                    @default(now())
+  updated_at      DateTime                    @updatedAt
+  last_message_at DateTime?
+  private_key     String?                     @unique @db.VarChar(150)
+  participants    conversation_participants[]
+  creator         utilisateurs?               @relation("conversation_creator", fields: [created_by], references: [id])
+  messages        messages[]
+
+  @@index([type])
+  @@index([created_by, created_at])
+  @@index([last_message_at])
+}
+
+model conversation_participants {
+  id              String        @id @default(uuid()) @db.Uuid
+  conversation_id String        @db.Uuid
+  user_id         String        @db.Uuid
+  role            String        @default("MEMBER") @db.VarChar(20)
+  joined_at       DateTime      @default(now())
+  last_read_at    DateTime?
+  last_typing_at  DateTime?
+  archived_at     DateTime?
+  muted_at        DateTime?
+  muted_until     DateTime?
+  conversation    conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  user            utilisateurs  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([conversation_id, user_id])
+  @@index([user_id])
+  @@index([user_id, archived_at])
+  @@index([user_id, muted_until])
+  @@index([conversation_id, last_typing_at])
+}
+
+model messages {
+  id                           String                      @id @default(uuid()) @db.Uuid
+  conversation_id              String                      @db.Uuid
+  sender_id                    String                      @db.Uuid
+  content                      String?
+  media                        Json?
+  created_at                   DateTime                    @default(now())
+  updated_at                   DateTime                    @updatedAt
+  edited_at                    DateTime?
+  delivered_at                 DateTime?
+  read_at                      DateTime?
+  status                       message_status              @default(SENT)
+  type                         message_type                @default(TEXT)
+  deleted_for_everyone_at      DateTime?
+  deleted_for_everyone_by      String?                     @db.Uuid
+  pinned_at                    DateTime?
+  pinned_by                    String?                     @db.Uuid
+  deleted_for_users            message_deleted_for_users[]
+  conversation                 conversations               @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  deleted_for_everyone_by_user utilisateurs?               @relation("message_deleted_for_everyone_by", fields: [deleted_for_everyone_by], references: [id])
+  pinned_by_user               utilisateurs?               @relation("message_pinner", fields: [pinned_by], references: [id])
+  sender                       utilisateurs                @relation("message_sender", fields: [sender_id], references: [id], onDelete: Cascade)
+
+  @@index([conversation_id, created_at])
+  @@index([sender_id])
+  @@index([pinned_at])
+  @@index([deleted_for_everyone_at])
+}
+
+model message_deleted_for_users {
+  id         String       @id @default(uuid()) @db.Uuid
+  message_id String       @db.Uuid
+  user_id    String       @db.Uuid
+  deleted_at DateTime     @default(now())
+  message    messages     @relation(fields: [message_id], references: [id], onDelete: Cascade)
+  user       utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([message_id, user_id])
+  @@index([user_id, deleted_at])
+  @@index([message_id])
+}
+
+model stories {
+  id         String        @id @default(uuid()) @db.Uuid
+  user_id    String        @db.Uuid
+  content    String?
+  media      Json?
+  created_at DateTime      @default(now())
+  expires_at DateTime
+  user       utilisateurs  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  views      story_views[]
+
+  @@index([user_id, created_at])
+  @@index([expires_at])
+}
+
+model story_views {
+  id        String       @id @default(uuid()) @db.Uuid
+  story_id  String       @db.Uuid
+  viewer_id String       @db.Uuid
+  viewed_at DateTime     @default(now())
+  story     stories      @relation(fields: [story_id], references: [id], onDelete: Cascade)
+  viewer    utilisateurs @relation(fields: [viewer_id], references: [id], onDelete: Cascade)
+
+  @@unique([story_id, viewer_id])
+  @@index([story_id])
+  @@index([viewer_id])
 }
 
 enum message_type {
@@ -94,696 +719,4 @@ enum message_status {
   SENT
   DELIVERED
   READ
-}
-
-// ==========================================
-// ÉTABLISSEMENTS (LYCÉES/UNIVERSITÉS)
-// ==========================================
-
-model etablissements {
-  id         String   @id @default(uuid()) @db.Uuid
-  nom        String   @unique @db.VarChar(255)
-  created_at DateTime @default(now())
-
-  @@index([nom])
-}
-
-// ==========================================
-// 2. MODULE INSTITUTIONS (CENTRES)
-// ==========================================
-
-model centres {
-  id               String    @id @default(uuid()) @db.Uuid
-  nom              String    @unique @db.VarChar(100)
-  gouvernorat      String    @db.VarChar(100)
-  delegation       String?   @db.VarChar(100)
-  adresse          String?   @db.VarChar(255)
-  code_postal      String?   @db.VarChar(10)
-  telephone_centre String?   @db.VarChar(20)
-  est_actif        Boolean   @default(true)
-  date_creation    DateTime? @default(now()) @db.Date
-
-  // Relations
-  utilisateurs            utilisateurs[]
-  clubs                   clubs[]
-  locaux                  locaux[]
-  inventaire              equipements[]
-  demandes_creation_clubs demandes_creation_clubs[]
-}
-
-// ==========================================
-// 3. MODULE CLUBS & ACTIVITÉS
-// ==========================================
-
-model clubs {
-  id          String  @id @default(uuid()) @db.Uuid
-  nom         String  @db.VarChar(100)
-  description String? @db.Text
-  categorie   String  @db.VarChar(50)
-  logo_url    String? @db.VarChar(255)
-  planning    Json?
-  capacite    Int?
-  locale_fixe String? @db.VarChar(100)
-  est_actif   Boolean @default(true)
-
-  // Relations
-  id_centre   String        @db.Uuid // 💡 Renommé
-  centre      centres       @relation(fields: [id_centre], references: [id], onDelete: Cascade)
-  id_coach    String?       @db.Uuid
-  responsable utilisateurs? @relation("coach_club", fields: [id_coach], references: [id], onDelete: SetNull)
-
-  staff        club_staff[]
-  taches       club_taches[]
-  inscriptions inscriptions_clubs[]
-  presences    presences_clubs[]
-  seances      seances[]
-  events       events[]
-  recommendation_sessions recommendation_sessions[]
-}
-
-model club_roles {
-  id          String       @id @default(uuid()) @db.Uuid
-  nom         String       @unique @db.VarChar(50)
-  description String?      @db.Text
-  is_active   Boolean      @default(true)
-  staff       club_staff[]
-}
-
-model club_staff {
-  id             String  @id @default(uuid()) @db.Uuid
-  id_club        String  @db.Uuid
-  id_utilisateur String  @db.Uuid
-  role_dans_club String  @db.VarChar(50)
-  is_active      Boolean @default(true)
-  id_club_role   String? @db.Uuid
-
-  club        clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)
-  utilisateur utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-  club_role   club_roles?  @relation(fields: [id_club_role], references: [id], onDelete: SetNull)
-
-  @@unique([id_club, id_utilisateur])
-}
-
-model club_taches {
-  id           String   @id @default(uuid()) @db.Uuid
-  id_club      String   @db.Uuid
-  titre        String   @db.VarChar(120)
-  description  String?  @db.Text
-  priorite     String   @db.VarChar(20)
-  date_limite  DateTime @db.Timestamp(6)
-  type_tache   String   @db.VarChar(80)
-  statut       String   @default("A_FAIRE") @db.VarChar(20)
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
-
-  id_createur String?       @db.Uuid
-  club        clubs         @relation(fields: [id_club], references: [id], onDelete: Cascade)
-  createur    utilisateurs?  @relation("club_task_creator", fields: [id_createur], references: [id], onDelete: SetNull)
-  affectations club_tache_affectations[]
-
-  @@index([id_club, date_limite])
-  @@index([id_club, priorite])
-  @@index([id_club, statut])
-}
-
-model club_tache_affectations {
-  id              String   @id @default(uuid()) @db.Uuid
-  id_tache        String   @db.Uuid
-  id_utilisateur   String   @db.Uuid
-  date_affectation DateTime @default(now()) @db.Timestamp(6)
-  statut          String   @default("EN_COURS") @db.VarChar(20) // EN_COURS, TERMINE, ANNULE
-
-  tache      club_taches   @relation(fields: [id_tache], references: [id], onDelete: Cascade)
-  utilisateur utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-
-  @@unique([id_tache, id_utilisateur])
-  @@index([id_tache, statut])
-  @@index([id_utilisateur, statut])
-}
-
-model inscriptions_clubs {
-  id                  String    @id @default(uuid()) @db.Uuid
-  id_utilisateur      String    @db.Uuid
-  id_club             String    @db.Uuid
-  statut              String    @default("EN_ATTENTE")
-  date_adhesion       DateTime  @default(now()) @db.Timestamp(6)
-  date_validation     DateTime? @db.Timestamp(6)
-  est_suspendu        Boolean   @default(false)
-  date_fin_suspension DateTime?
-  motif_suspension    String?
-  role_interne        String?   @default("MEMBRE")
-  responsable_id      String?   @db.Uuid
-  utilisateur utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-  club        clubs         @relation(fields: [id_club], references: [id], onDelete: Cascade)
-
-  @@unique([id_utilisateur, id_club])
-}
-
-model presences_clubs {
-  id             String   @id @default(uuid()) @db.Uuid
-  id_club        String   @db.Uuid
-  id_seance      String?  @db.Uuid
-  id_utilisateur String   @db.Uuid
-  id_responsable String   @db.Uuid
-  date_presence  DateTime @db.Date
-  statut         String   @db.VarChar(10)
-  remarque       String?  @db.VarChar(255)
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
-
-  club        clubs        @relation(fields: [id_club], references: [id], onDelete: Cascade)
-  membre      utilisateurs @relation("presence_membre", fields: [id_utilisateur], references: [id], onDelete: Cascade)
-  responsable utilisateurs @relation("presence_responsable", fields: [id_responsable], references: [id], onDelete: Restrict)
-  seance      seances?     @relation(fields: [id_seance], references: [id], onDelete: Cascade)
-
-  @@unique([id_club, id_utilisateur, id_seance])
-  @@index([id_club, date_presence])
-  @@index([id_utilisateur, date_presence])
-}
-
-model seances {
-  id          String    @id @default(uuid()) @db.Uuid
-  id_club     String    @db.Uuid
-  date_seance DateTime  @db.Date
-  titre       String?   @db.VarChar(255)
-  heure_debut DateTime? @db.Timestamp(6)
-  heure_fin   DateTime? @db.Timestamp(6)
-  created_by  String?   @db.Uuid
-  created_at  DateTime  @default(now())
-
-  club      clubs             @relation(fields: [id_club], references: [id], onDelete: Cascade)
-  presences presences_clubs[]
-
-  @@index([id_club, date_seance])
-}
-
-// ==========================================
-// 3.b MODULE RECOMMENDATION (ML)
-// ==========================================
-
-model recommendation_sessions {
-  id             Int      @id @default(autoincrement())
-  id_club        String   @db.Uuid
-  id_responsable String?  @db.Uuid
-  tranche_age    String   @db.VarChar(50)
-  niveau         String   @db.VarChar(50)
-  num_seance     Int
-  phase_annee    String   @db.VarChar(80)
-  saison         String   @db.VarChar(30)
-  mois           Int
-  jour_semaine   String   @db.VarChar(30)
-  format_seance  String   @db.VarChar(80)
-  lieu           String   @db.VarChar(120)
-  duree_minutes  Int
-  activite_j_minus_2  String? @db.VarChar(120)
-  activite_precedente String? @db.VarChar(120)
-  activite_actuelle   String  @db.VarChar(120)
-  difficulte          String  @db.VarChar(50)
-  niveau_fatigue      String  @db.VarChar(50)
-  humeur_groupe       String  @db.VarChar(50)
-  score_engagement    Float
-  nb_membres_total    Int
-  nb_presents         Int
-  taux_presence       Float
-  note_technique      Float
-  note_comportement   Float
-  evaluation_coach    String  @db.VarChar(80)
-  progression_observee String @db.VarChar(80)
-  meteo               String  @db.VarChar(50)
-  activite_exterieure String  @default("Non") @db.VarChar(20)
-  repetition_activite Int     @default(0)
-  sequence_logique    Int     @default(1)
-  created_at          DateTime @default(now())
-
-  club          clubs         @relation(fields: [id_club], references: [id], onDelete: Cascade)
-  responsable   utilisateurs? @relation(fields: [id_responsable], references: [id], onDelete: SetNull)
-  history       recommendation_history[]
-
-  @@index([id_club, created_at])
-  @@index([id_responsable, created_at])
-}
-
-model recommendation_history {
-  id              Int      @id @default(autoincrement())
-  session_id      Int
-  recommandations Json
-  modele_utilise  String   @db.VarChar(120)
-  activite_choisie String? @db.VarChar(120)
-  created_at      DateTime @default(now())
-
-  session recommendation_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade)
-
-  @@index([session_id, created_at])
-}
-
-// ==========================================
-// 4. MODULE GESTION DES LOCAUX & RÉSERVATIONS
-// ==========================================
-
-model locaux {
-  id           String   @id @default(uuid()) @db.Uuid
-  nom          String   @db.VarChar(100)
-  type         String   @db.VarChar(50)
-  capacite     Int?
-  localisation String?
-  prix_heure   Decimal? @db.Decimal(10, 2)
-  description  String?  @db.Text
-  image_url    String?  @db.VarChar(255)
-  est_actif    Boolean  @default(true)
-
-  // Relations
-  id_centre String  @db.Uuid // 💡 Renommé
-  centre    centres @relation(fields: [id_centre], references: [id], onDelete: Cascade)
-
-  reservations            reservations_locaux[]
-  events                  events[]
-  equipements             room_equipment[]
-  demandes_creation_clubs demandes_creation_clubs[]
-}
-
-model demandes_creation_clubs {
-  id                    String    @id @default(uuid()) @db.Uuid
-  nom_club              String    @db.VarChar(120)
-  categorie             String    @db.VarChar(80)
-  description           String?   @db.Text
-  planning_souhaite     Json?
-  statut                String    @default("EN_ATTENTE") @db.VarChar(20)
-  commentaire_decision  String?   @db.Text
-  cv_url                String?   @db.VarChar(255)
-  attestation_url       String?   @db.VarChar(255)
-  date_souhaitee        DateTime? @db.Date
-  heure_debut_souhaitee DateTime? @db.Timestamp(6)
-  heure_fin_souhaitee   DateTime? @db.Timestamp(6)
-  created_at            DateTime  @default(now())
-  updated_at            DateTime  @updatedAt
-
-  id_demandeur String       @db.Uuid
-  demandeur    utilisateurs @relation(fields: [id_demandeur], references: [id], onDelete: Cascade)
-
-  id_centre String?  @db.Uuid
-  centre    centres? @relation(fields: [id_centre], references: [id], onDelete: SetNull)
-
-  id_local_souhaite String? @db.Uuid
-  local_souhaite    locaux? @relation(fields: [id_local_souhaite], references: [id], onDelete: SetNull)
-
-  reviewed_by String? @db.Uuid
-
-  @@index([id_demandeur, created_at])
-  @@index([statut, created_at])
-  @@index([id_centre, statut])
-  @@index([id_local_souhaite])
-}
-
-model equipements {
-  id          String  @id @default(uuid()) @db.Uuid
-  nom         String  @db.VarChar(100)
-  description String? @db.Text
-  etat        String  @default("BON")
-  quantite    Int     @default(1)
-
-  // Relations
-  id_centre   String           @db.Uuid // 💡 Renommé
-  centre      centres          @relation(fields: [id_centre], references: [id], onDelete: Cascade)
-  locaux_lies room_equipment[]
-}
-
-model room_equipment {
-  id            String      @id @default(uuid()) @db.Uuid
-  id_local      String      @db.Uuid
-  id_equipement String      @db.Uuid
-  local         locaux      @relation(fields: [id_local], references: [id], onDelete: Cascade)
-  equipement    equipements @relation(fields: [id_equipement], references: [id], onDelete: Cascade)
-
-  @@unique([id_local, id_equipement])
-}
-
-model reservations_locaux {
-  id               String   @id @default(uuid()) @db.Uuid
-  date_reservation DateTime @db.Date
-  heure_debut      DateTime @db.Timestamp(6)
-  heure_fin        DateTime @db.Timestamp(6)
-  objet            String   @db.VarChar(255)
-  statut           String   @default("EN_ATTENTE")
-  prix_total       Decimal? @db.Decimal(10, 2)
-  date_creation    DateTime @default(now())
-
-  id_utilisateur String       @db.Uuid
-  utilisateur    utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-  id_local       String       @db.Uuid
-  local          locaux       @relation(fields: [id_local], references: [id], onDelete: Cascade)
-  payments       payments[]
-}
-
-model payments {
-  id                String   @id @default(uuid()) @db.Uuid
-  reservation_id    String   @db.Uuid
-  amount            Decimal  @db.Decimal(10, 2)
-  status            String   @default("PENDING") @db.VarChar(20)
-  stripe_session_id String?  @db.VarChar(255)
-  stripe_payment_id String?  @db.VarChar(255)
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-
-  reservation reservations_locaux @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
-
-  @@index([reservation_id])
-}
-
-model events {
-  id          String   @id @default(uuid()) @db.Uuid
-  nom         String   @db.VarChar(120)
-  description String?  @db.Text
-  date_event  DateTime @db.Date
-  start_time  DateTime @db.Timestamp(6)
-  end_time    DateTime @db.Timestamp(6)
-  capacity    Int?
-  timeline    Json?
-  is_active   Boolean  @default(true)
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  club_id                String?      @db.Uuid
-  club                   clubs?       @relation(fields: [club_id], references: [id], onDelete: SetNull)
-  collaborating_club_ids String[]     @default([])
-  locaux_id              String       @db.Uuid
-  local                  locaux       @relation(fields: [locaux_id], references: [id], onDelete: Restrict)
-  created_by             String       @db.Uuid
-  createur               utilisateurs @relation("event_creator", fields: [created_by], references: [id], onDelete: Restrict)
-
-  participants event_participants[]
-  feedbacks    eventFeedbacks[]
-
-  @@index([date_event, is_active])
-  @@index([club_id])
-  @@index([locaux_id])
-}
-
-model event_participants {
-  id             String   @id @default(uuid()) @db.Uuid
-  status         String   @default("INVITED") @db.VarChar(20)
-  checkin        Boolean  @default(false)
-  points_awarded Boolean  @default(false)
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
-
-  event_id String       @db.Uuid
-  event    events       @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  user_id  String       @db.Uuid
-  user     utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@unique([event_id, user_id])
-  @@index([user_id])
-}
-
-model eventFeedbacks {
-  id          String   @id @default(uuid()) @db.Uuid
-  note        Int
-  commentaire String?  @db.Text
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  event_id String       @db.Uuid
-  event    events       @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  user_id  String       @db.Uuid
-  user     utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@unique([event_id, user_id])
-  @@index([event_id])
-  @@index([user_id])
-  @@map("event_feedbacks")
-}
-
-// ==========================================
-// 5. MODULE NOTIFICATIONS
-// ==========================================
-
-model notifications {
-  id         String   @id @default(uuid()) @db.Uuid
-  titre      String   @db.VarChar(255)
-  message    String   @db.Text
-  type       String   @db.VarChar(50) // ADHESION_ACCEPTED, ADHESION_REJECTED, etc.
-  is_read    Boolean  @default(false)
-  data       Json? // Données additionnelles (id_club, id_inscription, etc.)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  id_utilisateur String       @db.Uuid
-  utilisateur    utilisateurs @relation(fields: [id_utilisateur], references: [id], onDelete: Cascade)
-}
-
-// ==========================================
-// 6. MODULE SOCIAL MEDIA & MESSAGERIE INTERNE
-// ==========================================
-
-model posts {
-  id         String   @id @default(uuid()) @db.Uuid
-  user_id    String   @db.Uuid
-  content    String   @db.Text
-  visibility String   @default("PUBLIC") @db.VarChar(20)
-  location   String?  @db.VarChar(255)
-  media      Json?
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  user         utilisateurs        @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  comments     comments[]
-  hashtags     post_hashtags[]
-  mentions     post_mentions[]
-  reactions    post_reactions[]
-  favorites    post_favorites[]
-  hidden_users post_hidden_users[]
-
-  @@index([user_id, created_at])
-  @@index([created_at])
-}
-
-model post_hidden_users {
-  id             String   @id @default(uuid()) @db.Uuid
-  post_id        String   @db.Uuid
-  hidden_user_id String   @db.Uuid
-  created_at     DateTime @default(now())
-
-  post        posts        @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  hidden_user utilisateurs @relation("post_hidden_target", fields: [hidden_user_id], references: [id], onDelete: Cascade)
-
-  @@unique([post_id, hidden_user_id])
-  @@index([post_id])
-  @@index([hidden_user_id])
-}
-
-model user_follows {
-  id          String   @id @default(uuid()) @db.Uuid
-  follower_id String   @db.Uuid
-  followed_id String   @db.Uuid
-  created_at  DateTime @default(now())
-
-  follower utilisateurs @relation("user_following", fields: [follower_id], references: [id], onDelete: Cascade)
-  followed utilisateurs @relation("user_followers", fields: [followed_id], references: [id], onDelete: Cascade)
-
-  @@unique([follower_id, followed_id])
-  @@index([follower_id, created_at])
-  @@index([followed_id, created_at])
-}
-
-model user_hidden_users {
-  id             String   @id @default(uuid()) @db.Uuid
-  user_id        String   @db.Uuid
-  hidden_user_id String   @db.Uuid
-  created_at     DateTime @default(now())
-
-  user        utilisateurs @relation("user_hidden_author", fields: [user_id], references: [id], onDelete: Cascade)
-  hidden_user utilisateurs @relation("user_hidden_target", fields: [hidden_user_id], references: [id], onDelete: Cascade)
-
-  @@unique([user_id, hidden_user_id])
-  @@index([user_id, created_at])
-  @@index([hidden_user_id])
-}
-
-model post_favorites {
-  id         String   @id @default(uuid()) @db.Uuid
-  post_id    String   @db.Uuid
-  user_id    String   @db.Uuid
-  created_at DateTime @default(now())
-
-  post posts        @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  user utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@unique([post_id, user_id])
-  @@index([post_id])
-  @@index([user_id, created_at])
-}
-
-model post_reactions {
-  id            String   @id @default(uuid()) @db.Uuid
-  post_id       String   @db.Uuid
-  user_id       String   @db.Uuid
-  reaction_type String   @db.VarChar(20)
-  created_at    DateTime @default(now())
-
-  post posts        @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  user utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@unique([post_id, user_id])
-  @@index([post_id])
-  @@index([user_id])
-}
-
-model post_hashtags {
-  id         String   @id @default(uuid()) @db.Uuid
-  post_id    String   @db.Uuid
-  hashtag    String   @db.VarChar(100)
-  created_at DateTime @default(now())
-
-  post posts @relation(fields: [post_id], references: [id], onDelete: Cascade)
-
-  @@unique([post_id, hashtag])
-  @@index([hashtag])
-  @@index([post_id])
-}
-
-model post_mentions {
-  id                String   @id @default(uuid()) @db.Uuid
-  post_id           String   @db.Uuid
-  mentioned_user_id String   @db.Uuid
-  created_at        DateTime @default(now())
-
-  post           posts        @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  mentioned_user utilisateurs @relation("post_mentioned_user", fields: [mentioned_user_id], references: [id], onDelete: Cascade)
-
-  @@unique([post_id, mentioned_user_id])
-  @@index([mentioned_user_id])
-  @@index([post_id])
-}
-
-model comments {
-  id         String   @id @default(uuid()) @db.Uuid
-  post_id    String   @db.Uuid
-  user_id    String   @db.Uuid
-  content    String   @db.Text
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  post posts        @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  user utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@index([post_id, created_at])
-  @@index([user_id])
-}
-
-model conversations {
-  id              String    @id @default(uuid()) @db.Uuid
-  type            String    @db.VarChar(20)
-  title           String?   @db.VarChar(150)
-  private_key     String?   @unique @db.VarChar(150)
-  created_by      String?   @db.Uuid
-  created_at      DateTime  @default(now())
-  updated_at      DateTime  @updatedAt
-  last_message_at DateTime?
-
-  creator      utilisateurs?               @relation("conversation_creator", fields: [created_by], references: [id], onDelete: SetNull)
-  participants conversation_participants[]
-  messages     messages[]
-
-  @@index([type])
-  @@index([created_by, created_at])
-  @@index([last_message_at])
-}
-
-model conversation_participants {
-  id              String    @id @default(uuid()) @db.Uuid
-  conversation_id String    @db.Uuid
-  user_id         String    @db.Uuid
-  role            String    @default("MEMBER") @db.VarChar(20)
-  joined_at       DateTime  @default(now())
-  archived_at     DateTime?
-  muted_at        DateTime?
-  muted_until     DateTime?
-  last_read_at    DateTime?
-  last_typing_at  DateTime?
-
-  conversation conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
-  user         utilisateurs  @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@unique([conversation_id, user_id])
-  @@index([user_id])
-  @@index([user_id, archived_at])
-  @@index([user_id, muted_until])
-  @@index([conversation_id, last_typing_at])
-}
-
-model messages {
-  id                      String         @id @default(uuid()) @db.Uuid
-  conversation_id         String         @db.Uuid
-  sender_id               String         @db.Uuid
-  type                    message_type   @default(TEXT)
-  status                  message_status @default(SENT)
-  content                 String?        @db.Text
-  media                   Json?
-  created_at              DateTime       @default(now())
-  updated_at              DateTime       @updatedAt
-  edited_at               DateTime?
-  delivered_at            DateTime?
-  read_at                 DateTime?
-  pinned_at               DateTime?
-  pinned_by               String?        @db.Uuid
-  deleted_for_everyone_at DateTime?
-  deleted_for_everyone_by String?        @db.Uuid
-
-  conversation                 conversations               @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
-  sender                       utilisateurs                @relation("message_sender", fields: [sender_id], references: [id], onDelete: Cascade)
-  pinned_by_user               utilisateurs?               @relation("message_pinner", fields: [pinned_by], references: [id], onDelete: SetNull)
-  deleted_for_everyone_by_user utilisateurs?               @relation("message_deleted_for_everyone_by", fields: [deleted_for_everyone_by], references: [id], onDelete: SetNull)
-  deleted_for_users            message_deleted_for_users[]
-
-  @@index([conversation_id, created_at])
-  @@index([sender_id])
-  @@index([pinned_at])
-  @@index([deleted_for_everyone_at])
-}
-
-model message_deleted_for_users {
-  id         String   @id @default(uuid()) @db.Uuid
-  message_id String   @db.Uuid
-  user_id    String   @db.Uuid
-  deleted_at DateTime @default(now())
-
-  message messages     @relation(fields: [message_id], references: [id], onDelete: Cascade)
-  user    utilisateurs @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@unique([message_id, user_id])
-  @@index([user_id, deleted_at])
-  @@index([message_id])
-}
-
-// ==========================================
-// 7. MODULE STORIES (Publications temporaires)
-// ==========================================
-
-model stories {
-  id         String   @id @default(uuid()) @db.Uuid
-  user_id    String   @db.Uuid
-  content    String?  @db.Text
-  media      Json? // [{type: 'image'|'video', url: string}]
-  created_at DateTime @default(now())
-  expires_at DateTime // 24h après created_at
-
-  user  utilisateurs  @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  views story_views[]
-
-  @@index([user_id, created_at])
-  @@index([expires_at])
-}
-
-model story_views {
-  id        String   @id @default(uuid()) @db.Uuid
-  story_id  String   @db.Uuid
-  viewer_id String   @db.Uuid
-  viewed_at DateTime @default(now())
-
-  story  stories      @relation(fields: [story_id], references: [id], onDelete: Cascade)
-  viewer utilisateurs @relation(fields: [viewer_id], references: [id], onDelete: Cascade)
-
-  @@unique([story_id, viewer_id])
-  @@index([story_id])
-  @@index([viewer_id])
 }

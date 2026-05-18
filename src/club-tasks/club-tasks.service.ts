@@ -52,6 +52,18 @@ export class ClubTasksService {
         },
       },
     },
+    commentaires: {
+      include: {
+        utilisateur: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            photo_profil_url: true,
+          },
+        },
+      },
+    },
   };
 
   private async getUserFullName(userId: string) {
@@ -838,5 +850,139 @@ export class ClubTasksService {
         },
       },
     });
+  }
+
+  // Comments
+  async listComments(userId: string, clubId: string, taskId: string) {
+    // allow if user is manager or assigned in club
+    const isManager = await this.prisma.utilisateurs.findFirst({
+      where: {
+        id: userId,
+        role: { in: ['RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE', 'ADMIN'] },
+      },
+      select: { id: true },
+    });
+
+    const assigned = await this.prisma.club_tache_affectations.findFirst({
+      where: { id_tache: taskId, id_utilisateur: userId },
+      select: { id: true },
+    });
+
+    if (!isManager && !assigned) {
+      // still allow creator of the task
+      const task = await this.prisma.club_taches.findFirst({
+        where: { id: taskId, id_createur: userId, id_club: clubId },
+        select: { id: true },
+      });
+      if (!task)
+        throw new ForbiddenException(
+          'Acces refuse aux commentaires de la tache',
+        );
+    }
+
+    return (this.prisma as any).club_tache_commentaires.findMany({
+      where: { id_tache: taskId },
+      include: {
+        utilisateur: {
+          select: { id: true, nom: true, prenom: true, photo_profil_url: true },
+        },
+      },
+      orderBy: { created_at: 'asc' },
+    });
+  }
+
+  async createComment(
+    userId: string,
+    clubId: string,
+    taskId: string,
+    message: string,
+  ) {
+    if (!message || !message.trim()) {
+      throw new BadRequestException('Le message est obligatoire');
+    }
+
+    // verify user can comment: manager or assigned or creator
+    const isManager = await this.prisma.utilisateurs.findFirst({
+      where: {
+        id: userId,
+        role: { in: ['RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE', 'ADMIN'] },
+      },
+      select: { id: true },
+    });
+
+    const assigned = await this.prisma.club_tache_affectations.findFirst({
+      where: { id_tache: taskId, id_utilisateur: userId },
+      select: { id: true },
+    });
+
+    const isCreator = await this.prisma.club_taches.findFirst({
+      where: { id: taskId, id_createur: userId, id_club: clubId },
+      select: { id: true },
+    });
+
+    if (!isManager && !assigned && !isCreator) {
+      throw new ForbiddenException('Vous ne pouvez pas commenter cette tache');
+    }
+
+    const created = await (this.prisma as any).club_tache_commentaires.create({
+      data: {
+        id_tache: taskId,
+        id_utilisateur: userId,
+        message: message.trim(),
+      },
+      include: {
+        utilisateur: {
+          select: { id: true, nom: true, prenom: true, photo_profil_url: true },
+        },
+      },
+    });
+
+    // Optionally notify other participants (assigned + createur except sender)
+    try {
+      const task = await this.getTaskWithRelationsOrThrow(taskId, clubId);
+      const actorName = await this.getUserFullName(userId);
+      const recipients = new Map<string, string>();
+      if (task.createur?.id && task.createur.id !== userId) {
+        recipients.set(
+          task.createur.id,
+          `${task.createur.prenom} ${task.createur.nom}`.trim(),
+        );
+      }
+      task.affectations.forEach((a) => {
+        if (a.utilisateur.id !== userId) {
+          recipients.set(
+            a.utilisateur.id,
+            `${a.utilisateur.prenom} ${a.utilisateur.nom}`.trim(),
+          );
+        }
+      });
+
+      if (recipients.size > 0) {
+        const title = 'Nouveau commentaire sur la tache';
+        const messageText = `${actorName} a ajoute un commentaire sur la tache ${task.titre}.`;
+        await Promise.all(
+          Array.from(recipients.keys()).map((recipientId) =>
+            this.safeCreateTaskNotification({
+              utilisateurId: recipientId,
+              type: 'TASK_UPDATED',
+              titre: title,
+              message: messageText,
+              data: {
+                taskId: task.id,
+                taskTitle: task.titre,
+                clubId: task.club?.id ?? clubId,
+                clubNom: task.club?.nom ?? null,
+                commentAuthorId: userId,
+                commentAuthorNomComplet: actorName,
+              },
+            }),
+          ),
+        );
+      }
+    } catch (err) {
+      console.error('Erreur notification commentaire:', err);
+    }
+
+    return created;
   }
 }
