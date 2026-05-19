@@ -382,6 +382,23 @@ export class ClubTasksService {
     }));
   }
 
+  async findAssignedTasksAcrossClubs(userId: string) {
+    const tasks = await this.prisma.club_taches.findMany({
+      where: {
+        affectations: {
+          some: { id_utilisateur: userId },
+        },
+      },
+      include: this.taskInclude,
+      orderBy: [{ date_limite: 'asc' }, { created_at: 'desc' }],
+    });
+
+    return tasks.map((task) => ({
+      ...task,
+      statut: this.normalizeStoredStatus(task.statut),
+    }));
+  }
+
   async create(userId: string, clubId: string, dto: CreateClubTaskDto) {
     await this.assertCanManageClub(userId, clubId);
 
