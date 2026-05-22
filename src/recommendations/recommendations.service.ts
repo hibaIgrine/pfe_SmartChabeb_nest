@@ -57,6 +57,7 @@ export class RecommendationsService {
   async predict(session: Session, topK = 3) {
     try {
       const payload = {
+        nom_dataset: session.club.nom_dataset ?? session.club.nom,
         club: session.club.nom,
         domaine: session.club.domaine,
         tranche_age: session.tranche_age,

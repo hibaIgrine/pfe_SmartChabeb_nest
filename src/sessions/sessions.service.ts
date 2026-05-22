@@ -19,6 +19,7 @@ export class SessionsService {
       club: {
         id: row.club.id,
         nom: row.club.nom,
+        nom_dataset: row.club.nom_dataset ?? null,
         domaine: row.club.categorie,
       },
       tranche_age: row.tranche_age,
@@ -59,7 +60,7 @@ export class SessionsService {
   ): Promise<Session> {
     const club = await this.prisma.clubs.findUnique({
       where: { id: createSessionDto.club_id },
-      select: { id: true, nom: true, categorie: true },
+      select: { id: true, nom: true, nom_dataset: true, categorie: true },
     });
 
     if (!club) {
@@ -104,6 +105,7 @@ export class SessionsService {
           select: {
             id: true,
             nom: true,
+            nom_dataset: true,
             categorie: true,
           },
         },
@@ -120,6 +122,7 @@ export class SessionsService {
           select: {
             id: true,
             nom: true,
+            nom_dataset: true,
             categorie: true,
           },
         },
@@ -138,6 +141,7 @@ export class SessionsService {
           select: {
             id: true,
             nom: true,
+            nom_dataset: true,
             categorie: true,
           },
         },

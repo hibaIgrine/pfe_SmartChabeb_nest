@@ -1,6 +1,7 @@
 export interface SessionClub {
   id: string;
   nom: string;
+  nom_dataset: string | null;
   domaine: string;
 }
 

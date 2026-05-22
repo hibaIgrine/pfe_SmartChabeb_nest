@@ -17,9 +17,18 @@ import { CreateClubTaskDto } from './dto/create-club-task.dto';
 import { UpdateClubTaskDto } from './dto/update-club-task.dto';
 import { UpdateClubTaskStatusDto } from './dto/update-club-task-status.dto';
 
+/**
+ * Controller for managing club tasks.
+ * Implements endpoints for CRUD operations on tasks, assignment, status updates, and comments.
+ * Requires JWT authentication for all endpoints, with role-based access control for certain operations.
+ */
 @Controller('clubs/:clubId/tasks')
 @UseGuards(AuthGuard('jwt'))
 export class ClubTasksController {
+  /**
+   * Injects the ClubTasksService to handle business logic.
+   * @param clubTasksService - Service for managing club tasks operations
+   */
   constructor(private readonly clubTasksService: ClubTasksService) {}
 
   @Get()

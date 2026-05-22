@@ -79,7 +79,9 @@ export class CertificatesService {
     }
 
     // 3. Préparer les données pour Flask
-    const fullName = `${participant.user.prenom} ${participant.user.nom}`;
+    const firstName = participant.user.prenom?.trim() || '';
+    const lastName = participant.user.nom?.trim() || '';
+    const fullName = `${firstName} ${lastName}`.trim();
     const clubName = event.club?.nom || 'Smart-Chabeb';
     const centerName = event.local?.centre?.nom || 'Maison de Jeunes';
     const eventDate = new Date(event.date_event).toLocaleDateString('fr-FR', {
@@ -89,10 +91,15 @@ export class CertificatesService {
     });
 
     const payload = {
+      prenom: firstName,
+      nom: lastName,
+      nom_complet: fullName,
       nom_etudiant: fullName,
       nom_club: clubName,
+      nom_centre: centerName,
       maison_jeune: centerName,
       nom_evenement: event.nom,
+      date_event: eventDate,
       date: eventDate,
     };
 
@@ -107,7 +114,28 @@ export class CertificatesService {
         },
       );
 
+      const contentType = String(resp.headers?.get?.('content-type') ?? '');
+      if (!resp.ok) {
+        const errorBody = await resp.text();
+        throw new InternalServerErrorException(
+          `Le service Flask a répondu avec le statut ${resp.status}. ${errorBody.slice(0, 300)}`,
+        );
+      }
+
+      if (!contentType.includes('application/json')) {
+        const responseText = await resp.text();
+        throw new InternalServerErrorException(
+          `Réponse inattendue du service Flask: ${contentType || 'type inconnu'}. ${responseText.slice(0, 300)}`,
+        );
+      }
+
       const responseData = await resp.json();
+
+      if (!responseData?.image) {
+        throw new InternalServerErrorException(
+          'Le service Flask a répondu sans image de certificat.',
+        );
+      }
 
       return {
         success: true,
@@ -118,6 +146,9 @@ export class CertificatesService {
       };
     } catch (error: any) {
       console.error('Erreur appel Flask:', error?.message ?? error);
+      if (error instanceof InternalServerErrorException) {
+        throw error;
+      }
       throw new InternalServerErrorException(
         'Erreur lors de la génération du certificat. Assurez-vous que le service Flask est actif (http://localhost:5000)',
       );

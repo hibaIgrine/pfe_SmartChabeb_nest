@@ -15,6 +15,10 @@ import { CreateReservationDto } from './dto/create-reservation.dto';
 
 import { PaymentsService } from 'src/payments/payments.service';
 
+/**
+ * Controller handling reservation-related endpoints
+ * Uses JWT authentication for all routes
+ */
 @Controller('reservations')
 @UseGuards(AuthGuard('jwt'))
 export class ReservationsController {

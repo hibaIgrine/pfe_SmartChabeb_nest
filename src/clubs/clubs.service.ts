@@ -35,6 +35,88 @@ export class ClubsService {
     private readonly reservationsService: ReservationsService,
   ) {}
 
+  private resolveDatasetClubName(data: {
+    nom?: string;
+    categorie?: string;
+    nom_dataset?: string;
+    nom_dataset_value?: string;
+  }): string | null {
+    const explicitValue = String(
+      data.nom_dataset ?? data.nom_dataset_value ?? '',
+    ).trim();
+    if (explicitValue) {
+      return explicitValue;
+    }
+
+    const source = `${data.nom ?? ''} ${data.categorie ?? ''}`.toLowerCase();
+
+    const rules: Array<{ test: RegExp; value: string }> = [
+      {
+        test: /chant|musique|choral|chorale|instrument|guitare|piano|violon|oud|derbouka|solf[eè]ge/,
+        value: 'Chant & Musique',
+      },
+      {
+        test: /peinture|dessin|arts? plastiques|croquis|portrait|aquarelle|acrylique|calligraphie|illustration/,
+        value: 'Peinture & Arts Plastiques',
+      },
+      {
+        test: /photo|photographie|cadrage|retouche|studio|reportage/,
+        value: 'Photo',
+      },
+      {
+        test: /video|vid[eé]o|montage|tournage|cin[eé]ma|film/,
+        value: 'Vidéo & Montage',
+      },
+      {
+        test: /robot|robotique|arduino|iot|capteur|programmation|javascript|python|scratch|informatique|dev/,
+        value: 'Robotique',
+      },
+      {
+        test: /bureaut|excel|word|powerpoint|outlook|google docs|google workspace/,
+        value: 'Bureautique',
+      },
+      { test: /football|foot/, value: 'Football' },
+      { test: /basket|basketball/, value: 'Basketball' },
+      { test: /handball|hand/, value: 'Handball' },
+      { test: /volley|volleyball/, value: 'Volleyball' },
+      { test: /ping|tennis de table/, value: 'Ping-Pong' },
+      { test: /natation|swim/, value: 'Natation' },
+      { test: /danse|dance|hip-hop|breakdance|chor[eé]graph/, value: 'Danse' },
+      { test: /th[eé]a?tre|scene|spectacle|dramat/, value: 'Théâtre' },
+      {
+        test: /langue|anglais|fran[cç]ais|espagnol|italien|arabe|allemand|d[eé]bat/,
+        value: 'Langues',
+      },
+      {
+        test: /lecture|litt[eé]r|po[eé]sie|roman|biblioth/,
+        value: 'Club Littéraire',
+      },
+      {
+        test: /ecol|environnement|nature|climat|recycl/,
+        value: 'Environnement',
+      },
+      { test: /cuisine|gastrono|patisse|pâtiss/, value: 'Cuisine' },
+      { test: /echecs|chess|damier/, value: 'Échecs' },
+      {
+        test: /entrepren|business|startup|crowdfunding/,
+        value: 'Entrepreneuriat',
+      },
+      {
+        test: /citoyen|media|m[eé]dias|journal|podcast|radio/,
+        value: 'Éducation aux Médias',
+      },
+      { test: /leadership|mentorat|coaching/, value: 'Leadership' },
+    ];
+
+    for (const rule of rules) {
+      if (rule.test.test(source)) {
+        return rule.value;
+      }
+    }
+
+    return null;
+  }
+
   private normalizePlanningObject(planning: any): Record<string, any> {
     if (!planning) return {};
 
@@ -291,6 +373,7 @@ export class ClubsService {
       data.planning,
       data.minimum_participants,
     );
+    const resolvedNomDataset = this.resolveDatasetClubName(data);
     const recurringReservations = resolvedLocalId
       ? this.buildRecurringReservations({
           planning: finalPlanning,
@@ -305,6 +388,7 @@ export class ClubsService {
       const nouveauClub = await tx.clubs.create({
         data: {
           nom: data.nom,
+          nom_dataset: resolvedNomDataset,
           description: data.description,
           categorie: data.categorie,
           id_centre: resolvedCentreId,
@@ -752,18 +836,25 @@ export class ClubsService {
 
     const current = await this.prisma.clubs.findUnique({
       where: { id },
-      select: { planning: true },
+      select: { planning: true, nom: true, categorie: true, nom_dataset: true },
     });
 
     let finalPlanning = this.withStartWorkflow(
       data.planning !== undefined ? data.planning : current?.planning,
       data.minimum_participants,
     );
+    const resolvedNomDataset = this.resolveDatasetClubName({
+      nom: data.nom ?? current?.nom,
+      categorie: data.categorie ?? current?.categorie,
+      nom_dataset: data.nom_dataset,
+      nom_dataset_value: data.nom_dataset_value,
+    });
 
     return await this.prisma.clubs.update({
       where: { id },
       data: {
         nom: data.nom,
+        nom_dataset: resolvedNomDataset ?? undefined,
         description: data.description,
         categorie: data.categorie,
         id_centre: data.id_centre, // 💡 id_salle -> id_centre
