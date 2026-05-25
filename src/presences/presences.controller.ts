@@ -14,6 +14,7 @@ import { PresencesService } from './presences.service';
 import { MarkPresenceDto } from './dto/mark-presence.dto';
 import { CreateSeanceDto } from './dto/create-seance.dto';
 import { UnmarkPresenceDto } from './dto/unmark-presence.dto';
+import { CreateSeanceFeedbackDto } from './dto/create-seance-feedback.dto';
 
 /**
  * Couche HTTP du module presences.
@@ -115,6 +116,46 @@ export class PresencesController {
       clubId,
       startDate,
       endDate,
+    );
+  }
+
+  // Renvoie les seances que l'adhérent a effectivement suivies.
+  @Get('adherent/seances')
+  @Roles('ADHERENT')
+  async getMyFeedbackSeances(@Request() req: any) {
+    return await this.presencesService.getMyFeedbackSeances(req.user.userId);
+  }
+
+  // Enregistre ou met a jour le feedback d'une séance.
+  @Post('adherent/seances/:seanceId/feedback')
+  @Roles('ADHERENT')
+  async submitSeanceFeedback(
+    @Request() req: any,
+    @Param('seanceId') seanceId: string,
+    @Body() dto: CreateSeanceFeedbackDto,
+  ) {
+    return await this.presencesService.submitSeanceFeedback(
+      req.user.userId,
+      seanceId,
+      dto,
+    );
+  }
+
+  // Liste les feedbacks pour les séances d'un club (accessible aux responsables)
+  @Get('clubs/:clubId/feedbacks')
+  @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
+  async getClubFeedbacks(
+    @Request() req: any,
+    @Param('clubId') clubId: string,
+    @Query('limit') limit?: string,
+    @Query('seanceId') seanceId?: string,
+  ) {
+    const parsedLimit = limit ? parseInt(limit, 10) : 100;
+    return await this.presencesService.getClubFeedbacks(
+      req.user.userId,
+      clubId,
+      parsedLimit,
+      seanceId,
     );
   }
 

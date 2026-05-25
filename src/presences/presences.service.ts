@@ -475,6 +475,317 @@ export class PresencesService {
     });
   }
 
+  // Liste les seances que l'adhérent a réellement suivies et peut commenter.
+  async getMyFeedbackSeances(userId: string) {
+    const prisma = this.prisma as any;
+
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    if (user.role !== 'ADHERENT') {
+      throw new ForbiddenException('Accès réservé aux adhérents');
+    }
+
+    const attendances = await this.prisma.presences_clubs.findMany({
+      where: {
+        id_utilisateur: userId,
+        statut: 'PRESENT',
+        seance: {
+          date_seance: {
+            lte: new Date(),
+          },
+        },
+      },
+      include: {
+        seance: {
+          include: {
+            club: {
+              select: {
+                id: true,
+                nom: true,
+                categorie: true,
+                logo_url: true,
+                id_coach: true,
+                responsable: {
+                  select: {
+                    id: true,
+                    nom: true,
+                    prenom: true,
+                    photo_profil_url: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ date_presence: 'desc' }, { created_at: 'desc' }],
+    });
+
+    const seanceIds = attendances
+      .map((item) => item.id_seance)
+      .filter((value): value is string => Boolean(value));
+
+    const feedbacks = seanceIds.length
+      ? await prisma.seance_feedbacks.findMany({
+          where: {
+            id_seance: { in: seanceIds },
+            id_utilisateur: userId,
+          },
+          select: {
+            id: true,
+            id_seance: true,
+            note_coach: true,
+            note_activites: true,
+            commentaire: true,
+            created_at: true,
+            updated_at: true,
+          },
+        })
+      : [];
+
+    const feedbackMap = new Map(
+      feedbacks.map((item) => [item.id_seance, item]),
+    );
+
+    return attendances
+      .map((attendance) => {
+        const seance = attendance.seance;
+        if (!seance) {
+          return null;
+        }
+
+        const feedback = feedbackMap.get(attendance.id_seance || '') || null;
+
+        return {
+          presenceId: attendance.id,
+          seanceId: attendance.id_seance,
+          club: seance.club,
+          date_presence: this.formatDate(attendance.date_presence),
+          seance: {
+            id: seance.id,
+            titre: seance.titre,
+            date_seance: this.formatDate(seance.date_seance),
+            heure_debut: seance.heure_debut,
+            heure_fin: seance.heure_fin,
+          },
+          myFeedback: feedback,
+          canRate: seance.date_seance.getTime() <= Date.now(),
+        };
+      })
+      .filter(Boolean);
+  }
+
+  // Permet à un adhérent de noter une séance qu'il a effectivement suivie.
+  async submitSeanceFeedback(userId: string, seanceId: string, dto: any) {
+    const prisma = this.prisma as any;
+
+    const [user, seance, attendance] = await Promise.all([
+      this.prisma.utilisateurs.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true },
+      }),
+      this.prisma.seances.findUnique({
+        where: { id: seanceId },
+        select: {
+          id: true,
+          id_club: true,
+          date_seance: true,
+          titre: true,
+          club: {
+            select: {
+              id: true,
+              nom: true,
+              responsable: {
+                select: {
+                  id: true,
+                  nom: true,
+                  prenom: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.presences_clubs.findFirst({
+        where: {
+          id_seance: seanceId,
+          id_utilisateur: userId,
+          statut: 'PRESENT',
+        },
+        select: { id: true, statut: true },
+      }),
+    ]);
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+
+    if (user.role !== 'ADHERENT') {
+      throw new ForbiddenException('Accès réservé aux adhérents');
+    }
+
+    if (!seance) {
+      throw new NotFoundException('Séance introuvable');
+    }
+
+    if (!attendance) {
+      throw new ForbiddenException(
+        'Seuls les membres présents peuvent donner un feedback',
+      );
+    }
+
+    if (seance.date_seance.getTime() > Date.now()) {
+      throw new BadRequestException(
+        'Le feedback est disponible après la séance',
+      );
+    }
+
+    const noteCoach = Number(dto.note_coach);
+    const noteActivites = Number(dto.note_activites);
+
+    if (!Number.isInteger(noteCoach) || noteCoach < 1 || noteCoach > 5) {
+      throw new BadRequestException(
+        'La note du coach doit être comprise entre 1 et 5',
+      );
+    }
+
+    if (
+      !Number.isInteger(noteActivites) ||
+      noteActivites < 1 ||
+      noteActivites > 5
+    ) {
+      throw new BadRequestException(
+        'La note des activités doit être comprise entre 1 et 5',
+      );
+    }
+
+    const commentaire = dto.commentaire?.trim() || null;
+    if (commentaire && commentaire.length > 500) {
+      throw new BadRequestException(
+        'Le commentaire ne doit pas dépasser 500 caractères',
+      );
+    }
+
+    const feedback = await prisma.seance_feedbacks.upsert({
+      where: {
+        id_seance_id_utilisateur: {
+          id_seance: seanceId,
+          id_utilisateur: userId,
+        },
+      },
+      update: {
+        note_coach: noteCoach,
+        note_activites: noteActivites,
+        commentaire,
+      },
+      create: {
+        id_seance: seanceId,
+        id_utilisateur: userId,
+        note_coach: noteCoach,
+        note_activites: noteActivites,
+        commentaire,
+      },
+    });
+
+    return {
+      feedback,
+      seance: {
+        id: seance.id,
+        titre: seance.titre,
+        date_seance: this.formatDate(seance.date_seance),
+        club: seance.club,
+      },
+    };
+  }
+
+  // Permet à un responsable de club/centre de consulter les feedbacks laissés
+  // sur les séances de son(s) club(s). Retourne la liste des feedbacks et un
+  // résumé (moyennes) par séance.
+  async getClubFeedbacks(
+    userId: string,
+    clubId: string,
+    limit = 100,
+    seanceId?: string,
+  ) {
+    await this.assertCanManageClub(userId, clubId);
+
+    const take = Number.isFinite(Number(limit))
+      ? Math.min(Math.max(Number(limit), 1), 500)
+      : 100;
+
+    // Valide et récupère les séances applicables
+    const seanceWhere: any = seanceId
+      ? { id: seanceId, id_club: clubId }
+      : { id_club: clubId };
+
+    const seances = await this.prisma.seances.findMany({
+      where: seanceWhere,
+      select: { id: true, titre: true, date_seance: true },
+    });
+
+    const seanceIds = seances.map((s) => s.id);
+
+    if (seanceIds.length === 0) {
+      return { feedbacks: [], summary: [] };
+    }
+
+    const prisma: any = this.prisma as any;
+
+    const feedbacks = await prisma.seance_feedbacks.findMany({
+      where: { id_seance: { in: seanceIds } },
+      include: {
+        seance: { select: { id: true, titre: true, date_seance: true } },
+        utilisateur: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            photo_profil_url: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+      take,
+    });
+
+    // Calcul des moyennes par séance
+    const bySeance = new Map<
+      string,
+      { count: number; sumCoach: number; sumActivities: number }
+    >();
+
+    for (const f of feedbacks) {
+      const key = f.id_seance;
+      const cur = bySeance.get(key) || {
+        count: 0,
+        sumCoach: 0,
+        sumActivities: 0,
+      };
+      cur.count += 1;
+      cur.sumCoach += f.note_coach || 0;
+      cur.sumActivities += f.note_activites || 0;
+      bySeance.set(key, cur);
+    }
+
+    const summary = Array.from(bySeance.entries()).map(([sid, v]) => ({
+      seanceId: sid,
+      average_coach: v.count ? Number((v.sumCoach / v.count).toFixed(2)) : 0,
+      average_activities: v.count
+        ? Number((v.sumActivities / v.count).toFixed(2))
+        : 0,
+      count: v.count,
+    }));
+
+    return { feedbacks, summary };
+  }
+
   // Calcule les statistiques de presence globales et par membre.
   async getStats(
     userId: string,

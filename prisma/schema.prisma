@@ -67,6 +67,7 @@ model utilisateurs {
   posts                         posts[]
   presences_marquees            presences_clubs[]           @relation("presence_responsable")
   presences_club                presences_clubs[]           @relation("presence_membre")
+  seance_feedbacks              seance_feedbacks[]          @relation("seance_feedback_author")
   recommendation_sessions       recommendation_sessions[]
   reservations                  reservations_locaux[]
   stories                       stories[]
@@ -268,9 +269,28 @@ model seances {
   created_by  String?           @db.Uuid
   created_at  DateTime          @default(now())
   presences   presences_clubs[]
+  feedbacks   seance_feedbacks[]
   club        clubs             @relation(fields: [id_club], references: [id], onDelete: Cascade)
 
   @@index([id_club, date_seance])
+}
+
+model seance_feedbacks {
+  id             String       @id @default(uuid()) @db.Uuid
+  id_seance      String       @db.Uuid
+  id_utilisateur String       @db.Uuid
+  note_coach     Int          @db.SmallInt
+  note_activites Int          @db.SmallInt
+  commentaire    String?      @db.Text
+  created_at     DateTime     @default(now())
+  updated_at     DateTime     @updatedAt
+
+  seance         seances      @relation(fields: [id_seance], references: [id], onDelete: Cascade)
+  utilisateur    utilisateurs @relation("seance_feedback_author", fields: [id_utilisateur], references: [id], onDelete: Cascade)
+
+  @@unique([id_seance, id_utilisateur])
+  @@index([id_seance, created_at])
+  @@index([id_utilisateur, created_at])
 }
 
 model recommendation_sessions {
