@@ -685,9 +685,10 @@ export class EventsService {
                 : (timeline as Prisma.InputJsonValue),
             club_id: primaryClub?.id,
             collaborating_club_ids: resolvedCollaborators,
+            is_active: requester.role !== 'RESPONSABLE_CLUB',
             locaux_id: dto.locaux_id,
             created_by: userId,
-          },
+          } as any,
           include: {
             club: { select: { id: true, nom: true, id_centre: true } },
             local: { select: { id: true, nom: true, id_centre: true } },
@@ -1455,6 +1456,36 @@ export class EventsService {
     return this.prisma.events.update({
       where: { id: eventId },
       data: { is_active: isActive },
+      include: {
+        club: { select: { id: true, nom: true } },
+        local: { select: { id: true, nom: true } },
+      },
+    });
+  }
+
+  async refuseEventRequest(userId: string, eventId: string) {
+    const requester = await this.resolveRequester(userId);
+
+    const existing = await this.prisma.events.findUnique({
+      where: { id: eventId },
+      include: {
+        club: { select: { id_coach: true, id_centre: true } },
+        local: { select: { id_centre: true } },
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Evenement introuvable');
+    }
+
+    this.assertCanManageEvent(requester, existing.local.id_centre, {
+      id_coach: existing.club?.id_coach ?? null,
+      id_centre: existing.club?.id_centre ?? existing.local.id_centre,
+    });
+
+    return this.prisma.events.update({
+      where: { id: eventId },
+      data: { is_active: false },
       include: {
         club: { select: { id: true, nom: true } },
         local: { select: { id: true, nom: true } },

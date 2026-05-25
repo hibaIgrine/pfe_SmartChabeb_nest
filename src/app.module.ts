@@ -17,6 +17,7 @@ import { PresencesModule } from './presences/presences.module';
 
 import { NotificationsModule } from './notifications/notifications.module';
 import { EventsModule } from './events/events.module';
+import { EventRequestCreationsModule } from './event-request-creations/event-request-creations.module';
 import { ClubCreationRequestsModule } from './club-creation-requests/club-creation-requests.module';
 import { SocialMediaModule } from './social-media/social-media.module';
 import { MessagerieModule } from './messagerie/messagerie.module';
@@ -69,6 +70,7 @@ import { ChatbotModule } from './chatbot/chatbot.module';
     ReservationsModule,
     PresencesModule,
     EventsModule,
+    EventRequestCreationsModule,
     ClubCreationRequestsModule,
     SocialMediaModule,
     MessagerieModule,

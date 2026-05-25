@@ -76,10 +76,21 @@ export class PresencesService {
       throw new NotFoundException('Club introuvable');
     }
 
-    if (user.role === 'RESPONSABLE_CLUB' && club.id_coach !== userId) {
-      throw new ForbiddenException(
-        'Vous ne pouvez gerer que les presences de votre club',
-      );
+    if (user.role === 'RESPONSABLE_CLUB') {
+      const staffMembership = await this.prisma.club_staff.findFirst({
+        where: {
+          id_club: clubId,
+          id_utilisateur: userId,
+          is_active: true,
+        },
+        select: { id: true },
+      });
+
+      if (club.id_coach !== userId && !staffMembership) {
+        throw new ForbiddenException(
+          'Vous ne pouvez gerer que les presences de votre club',
+        );
+      }
     }
 
     if (
@@ -114,7 +125,19 @@ export class PresencesService {
 
     const whereClause =
       user.role === 'RESPONSABLE_CLUB'
-        ? { id_coach: userId }
+        ? {
+            OR: [
+              { id_coach: userId },
+              {
+                staff: {
+                  some: {
+                    id_utilisateur: userId,
+                    is_active: true,
+                  },
+                },
+              },
+            ],
+          }
         : { id_centre: user.id_centre || '__NO_CENTRE__' };
 
     return await this.prisma.clubs.findMany({

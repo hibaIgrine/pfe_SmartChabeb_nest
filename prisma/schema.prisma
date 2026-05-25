@@ -49,6 +49,8 @@ model utilisateurs {
   conversation_participations   conversation_participants[]
   conversations_created         conversations[]             @relation("conversation_creator")
   demandes_creation_clubs       demandes_creation_clubs[]
+  event_request_creations_created event_request_creations[]   @relation("event_request_creator")
+  event_request_creations_reviewed event_request_creations[]   @relation("event_request_reviewer")
   event_feedbacks               eventFeedbacks[]
   event_participations          event_participants[]
   events_crees                  events[]                    @relation("event_creator")
@@ -120,6 +122,7 @@ model clubs {
   centre                  centres                   @relation(fields: [id_centre], references: [id], onDelete: Cascade)
   responsable             utilisateurs?             @relation("coach_club", fields: [id_coach], references: [id])
   events                  events[]
+  event_request_creations  event_request_creations[]
   inscriptions            inscriptions_clubs[]
   presences               presences_clubs[]
   recommendation_sessions recommendation_sessions[]
@@ -336,6 +339,7 @@ model locaux {
   id_centre               String                    @db.Uuid
   demandes_creation_clubs demandes_creation_clubs[]
   events                  events[]
+  event_request_creations event_request_creations[]
   centre                  centres                   @relation(fields: [id_centre], references: [id], onDelete: Cascade)
   reservations            reservations_locaux[]
   equipements             room_equipment[]
@@ -442,10 +446,42 @@ model events {
   club                   clubs?               @relation(fields: [club_id], references: [id])
   createur               utilisateurs         @relation("event_creator", fields: [created_by], references: [id])
   local                  locaux               @relation(fields: [locaux_id], references: [id])
+  request_creation       event_request_creations?
 
   @@index([date_event, is_active])
   @@index([club_id])
   @@index([locaux_id])
+}
+
+model event_request_creations {
+  id                     String       @id @default(uuid()) @db.Uuid
+  nom                    String       @db.VarChar(120)
+  description            String?
+  date_event             DateTime     @db.Date
+  start_time             DateTime     @db.Timestamp(6)
+  end_time               DateTime     @db.Timestamp(6)
+  capacity               Int?
+  status                 String       @default("PENDING") @db.VarChar(20)
+  created_at             DateTime     @default(now())
+  updated_at             DateTime     @updatedAt
+  reviewed_at            DateTime?    @db.Timestamp(6)
+  club_id                String?      @db.Uuid
+  locaux_id              String       @db.Uuid
+  created_by             String       @db.Uuid
+  reviewed_by            String?      @db.Uuid
+  event_id               String?      @unique @db.Uuid
+  timeline               Json?
+  collaborating_club_ids String[]     @default([])
+  requester              utilisateurs @relation("event_request_creator", fields: [created_by], references: [id], onDelete: Cascade)
+  reviewer               utilisateurs? @relation("event_request_reviewer", fields: [reviewed_by], references: [id])
+  club                   clubs?       @relation(fields: [club_id], references: [id])
+  local                  locaux       @relation(fields: [locaux_id], references: [id], onDelete: Cascade)
+  event                  events?      @relation(fields: [event_id], references: [id], onDelete: SetNull)
+
+  @@index([status, created_at])
+  @@index([club_id])
+  @@index([locaux_id])
+  @@map("event_request_creation")
 }
 
 model event_participants {

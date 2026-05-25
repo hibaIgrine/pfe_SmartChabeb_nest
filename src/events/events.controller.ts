@@ -164,6 +164,13 @@ export class EventsController {
     return this.eventsService.setActive(req.user.userId, id, true);
   }
 
+  @Patch(':id/refuse-request')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE', 'RESPONSABLE_CLUB')
+  refuseRequest(@Request() req: any, @Param('id') id: string) {
+    return this.eventsService.refuseEventRequest(req.user.userId, id);
+  }
+
   @Patch(':id/deactivate')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'RESPONSABLE_CENTRE', 'RESPONSABLE_CLUB')
