@@ -3,6 +3,7 @@ export interface ChatbotMessagePart {
 }
 
 export interface ChatbotHistoryMessage {
+  // 'model' pour la réponse de l'IA, 'user' pour l'utilisateur
   role: 'user' | 'model';
   parts: ChatbotMessagePart[];
 }

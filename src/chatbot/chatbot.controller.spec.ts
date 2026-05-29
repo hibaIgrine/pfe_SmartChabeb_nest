@@ -4,11 +4,14 @@ import { ChatbotService } from './chatbot.service';
 
 describe('ChatbotController', () => {
   let controller: ChatbotController;
+  const chatbotServiceMock = {
+    getChatResponse: jest.fn().mockResolvedValue('ok'),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ChatbotController],
-      providers: [ChatbotService],
+      providers: [{ provide: ChatbotService, useValue: chatbotServiceMock }],
     }).compile();
 
     controller = module.get<ChatbotController>(ChatbotController);
