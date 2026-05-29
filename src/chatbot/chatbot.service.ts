@@ -1,8 +1,16 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Groq from 'groq-sdk';
 import { PrismaService } from '../prisma/prisma.service';
-import type { ChatbotHistoryMessage } from './chatbot.types';
+import type {
+  ChatbotHistoryMessage,
+  ChatbotResponseDto,
+} from './chatbot.types';
 
 type ChatbotAgendaItem = {
   source: 'event' | 'reservation';
@@ -26,6 +34,29 @@ type ChatbotLocalContext = {
   agenda: ChatbotAgendaItem[];
 };
 
+type ChatbotStoredMessage = {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  content: string | null;
+  created_at: Date;
+};
+
+type ChatbotStoredConversation = {
+  id: string;
+  title: string | null;
+  updated_at: Date;
+  messages: ChatbotStoredMessage[];
+  participants: { user_id: string }[];
+};
+
+type ChatbotConversation = {
+  id: string;
+  title: string;
+  messages: ChatbotHistoryMessage[];
+  updatedAt: string;
+};
+
 @Injectable()
 export class ChatbotService {
   private groqClient: Groq | null = null;
@@ -34,21 +65,74 @@ export class ChatbotService {
   private readonly availabilityLookaheadDays = 30;
   private readonly outOfScopeReply =
     "Désolé, je n'ai pas l'accès pour répondre à cette question hors sujet. Je peux seulement aider sur les maisons des jeunes, les clubs, les événements, les locaux, la disponibilité des locaux et les activités de club.";
+  private readonly chatbotUserEmail = 'chatbot@smartchabeb.local';
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {}
 
+  async getUserConversations(userId: string): Promise<ChatbotConversation[]> {
+    const botUserId = await this.getOrCreateChatbotUserId();
+    const conversations = await this.prisma.conversations.findMany({
+      where: {
+        type: 'chatbot',
+        created_by: userId,
+      },
+      include: {
+        messages: {
+          orderBy: {
+            created_at: 'asc',
+          },
+        },
+        participants: {
+          select: {
+            user_id: true,
+          },
+        },
+      },
+      orderBy: {
+        updated_at: 'desc',
+      },
+      take: 20,
+    });
+
+    return conversations.map((conversation) =>
+      this.formatConversation(
+        conversation as ChatbotStoredConversation,
+        botUserId,
+      ),
+    );
+  }
+
+  async getUserConversation(userId: string, conversationId: string) {
+    const botUserId = await this.getOrCreateChatbotUserId();
+    const conversation = await this.findConversationForUser(
+      userId,
+      conversationId,
+    );
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation introuvable');
+    }
+
+    return this.formatConversation(
+      conversation as ChatbotStoredConversation,
+      botUserId,
+    );
+  }
+
   async getChatResponse(
+    userId: string,
     history: ChatbotHistoryMessage[] = [],
     userMessage: string,
-  ): Promise<string> {
+    conversationId?: string,
+  ): Promise<ChatbotResponseDto> {
     try {
       const normalizedMessage = userMessage.toLowerCase().trim();
 
-      if (!this.isInScope(normalizedMessage)) {
-        return this.outOfScopeReply;
+      if (!normalizedMessage) {
+        throw new BadRequestException('Le message ne peut pas être vide.');
       }
 
       const [clubs, events, locaux, reservations] = await Promise.all([
@@ -122,6 +206,19 @@ export class ChatbotService {
         }),
       ]);
 
+      const botUserId = await this.getOrCreateChatbotUserId();
+      const existingConversation = conversationId
+        ? await this.findConversationForUser(userId, conversationId)
+        : null;
+
+      if (conversationId && !existingConversation) {
+        throw new NotFoundException('Conversation introuvable');
+      }
+
+      const previousMessages = existingConversation
+        ? this.formatStoredMessages(existingConversation.messages, botUserId)
+        : this.normalizeHistory(history);
+
       const localContexts = this.buildLocalContexts(
         locaux,
         events,
@@ -130,22 +227,44 @@ export class ChatbotService {
       const systemPrompt = this.buildSystemPrompt(clubs, events, localContexts);
       const messages: any[] = [
         { role: 'system', content: systemPrompt },
-        ...this.normalizeHistory(history),
+        ...previousMessages,
         { role: 'user', content: userMessage.trim() },
       ];
 
-      const groq = this.getGroqClient();
-      const chatCompletion = await groq.chat.completions.create({
-        messages,
-        model: this.model,
-        temperature: 0.2,
-      });
+      const assistantReply = this.isInScope(normalizedMessage)
+        ? await this.generateGroqReply(messages)
+        : this.outOfScopeReply;
 
-      return (
-        chatCompletion.choices[0]?.message?.content ||
-        'Désolé, je ne peux pas répondre.'
-      );
+      const savedConversation = existingConversation
+        ? await this.appendToExistingConversation({
+            conversation: existingConversation,
+            userId,
+            botUserId,
+            userMessage: userMessage.trim(),
+            assistantMessage: assistantReply,
+          })
+        : await this.createConversationWithMessages({
+            userId,
+            botUserId,
+            title: this.buildConversationTitle([
+              { role: 'user', parts: [{ text: userMessage.trim() }] },
+            ]),
+            userMessage: userMessage.trim(),
+            assistantMessage: assistantReply,
+          });
+
+      return {
+        response: assistantReply,
+        conversationId: savedConversation.id,
+      };
     } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      ) {
+        throw error;
+      }
+
       console.error('Erreur Groq:', error);
       throw new InternalServerErrorException('Service IA indisponible.');
     }
@@ -166,6 +285,199 @@ export class ChatbotService {
 
     this.groqClient = new Groq({ apiKey });
     return this.groqClient;
+  }
+
+  private async generateGroqReply(
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  ) {
+    const groq = this.getGroqClient();
+    const chatCompletion = await groq.chat.completions.create({
+      messages,
+      model: this.model,
+      temperature: 0.2,
+    });
+
+    return (
+      chatCompletion.choices[0]?.message?.content ||
+      'Désolé, je ne peux pas répondre.'
+    );
+  }
+
+  private async getOrCreateChatbotUserId() {
+    const botUser = await this.prisma.utilisateurs.upsert({
+      where: { email: this.chatbotUserEmail },
+      update: {},
+      create: {
+        nom: 'Chatbot',
+        prenom: 'Assistant',
+        email: this.chatbotUserEmail,
+        mot_de_passe: null,
+        role: 'CHATBOT',
+        compte_actif: false,
+        est_verifie: true,
+      },
+      select: { id: true },
+    });
+
+    return botUser.id;
+  }
+
+  private async findConversationForUser(
+    userId: string,
+    conversationId: string,
+  ): Promise<ChatbotStoredConversation | null> {
+    const conversation = await this.prisma.conversations.findFirst({
+      where: {
+        id: conversationId,
+        type: 'chatbot',
+        created_by: userId,
+      },
+      include: {
+        messages: {
+          orderBy: {
+            created_at: 'asc',
+          },
+        },
+        participants: {
+          select: {
+            user_id: true,
+          },
+        },
+      },
+    });
+
+    return conversation as ChatbotStoredConversation | null;
+  }
+
+  private formatConversation(
+    conversation: ChatbotStoredConversation,
+    botUserId: string,
+  ): ChatbotConversation {
+    return {
+      id: conversation.id,
+      title: conversation.title ?? 'Nouvelle conversation',
+      messages: this.formatStoredMessages(conversation.messages, botUserId),
+      updatedAt: conversation.updated_at.toISOString(),
+    };
+  }
+
+  private formatStoredMessages(
+    messages: ChatbotStoredMessage[],
+    botUserId: string,
+  ): ChatbotHistoryMessage[] {
+    return messages
+      .filter((message) => Boolean(message.content?.trim()))
+      .map((message) => ({
+        role: message.sender_id === botUserId ? 'model' : 'user',
+        parts: [{ text: message.content ?? '' }],
+      }));
+  }
+
+  private buildConversationTitle(messages: ChatbotHistoryMessage[]) {
+    const firstUserMessage = messages
+      .find((message) => message.role === 'user')
+      ?.parts[0]?.text?.trim();
+
+    if (!firstUserMessage) {
+      return 'Nouvelle conversation';
+    }
+
+    return firstUserMessage.length > 42
+      ? `${firstUserMessage.slice(0, 42).trim()}...`
+      : firstUserMessage;
+  }
+
+  private async createConversationWithMessages(params: {
+    userId: string;
+    botUserId: string;
+    title: string;
+    userMessage: string;
+    assistantMessage: string;
+  }) {
+    const { userId, botUserId, title, userMessage, assistantMessage } = params;
+
+    return this.prisma.$transaction(async (tx) => {
+      const conversation = await tx.conversations.create({
+        data: {
+          type: 'chatbot',
+          title,
+          created_by: userId,
+          participants: {
+            create: [
+              {
+                user_id: userId,
+                role: 'MEMBER',
+              },
+              {
+                user_id: botUserId,
+                role: 'BOT',
+              },
+            ],
+          },
+        },
+      });
+
+      await tx.messages.createMany({
+        data: [
+          {
+            conversation_id: conversation.id,
+            sender_id: userId,
+            content: userMessage,
+          },
+          {
+            conversation_id: conversation.id,
+            sender_id: botUserId,
+            content: assistantMessage,
+          },
+        ],
+      });
+
+      await tx.conversations.update({
+        where: { id: conversation.id },
+        data: {
+          last_message_at: new Date(),
+        },
+      });
+
+      return conversation;
+    });
+  }
+
+  private async appendToExistingConversation(params: {
+    conversation: ChatbotStoredConversation;
+    userId: string;
+    botUserId: string;
+    userMessage: string;
+    assistantMessage: string;
+  }) {
+    const { conversation, userId, botUserId, userMessage, assistantMessage } =
+      params;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.messages.createMany({
+        data: [
+          {
+            conversation_id: conversation.id,
+            sender_id: userId,
+            content: userMessage,
+          },
+          {
+            conversation_id: conversation.id,
+            sender_id: botUserId,
+            content: assistantMessage,
+          },
+        ],
+      });
+
+      await tx.conversations.update({
+        where: { id: conversation.id },
+        data: {
+          last_message_at: new Date(),
+        },
+      });
+    });
+
+    return conversation;
   }
 
   private normalizeHistory(

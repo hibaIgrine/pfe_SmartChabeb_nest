@@ -11,4 +11,10 @@ export interface ChatbotHistoryMessage {
 export interface ChatbotAskDto {
   message: string;
   history?: ChatbotHistoryMessage[];
+  conversationId?: string;
+}
+
+export interface ChatbotResponseDto {
+  response: string;
+  conversationId: string;
 }
