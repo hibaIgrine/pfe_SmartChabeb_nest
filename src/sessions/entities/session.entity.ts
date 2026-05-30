@@ -9,6 +9,7 @@ export interface Session {
   id: number;
   club_id: string;
   club: SessionClub;
+  activite_choisie: string | null;
   tranche_age: string;
   niveau: string;
   num_seance: number;

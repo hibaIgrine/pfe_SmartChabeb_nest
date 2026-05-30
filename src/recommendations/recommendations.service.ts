@@ -91,6 +91,14 @@ export class RecommendationsService {
         top_k: topK,
       };
 
+      console.log('=== PAYLOAD FLASK ===');
+      console.log('nom_dataset :', payload.nom_dataset);
+      console.log('club        :', payload.club);
+      console.log('domaine     :', payload.domaine);
+      console.log('J-2         :', payload.activite_j_minus_2);
+      console.log('precedente  :', payload.activite_precedente);
+      console.log('actuelle    :', payload.activite_actuelle);
+
       const { data } = await firstValueFrom(
         this.http.post(`${this.flaskUrl}/predict`, payload),
       );

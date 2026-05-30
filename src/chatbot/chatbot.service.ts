@@ -34,6 +34,20 @@ type ChatbotLocalContext = {
   agenda: ChatbotAgendaItem[];
 };
 
+type ChatbotEventPlanningContext = {
+  id: string;
+  nom: string;
+  date_event: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+  capacity: number | null;
+  club: string | null;
+  local: string | null;
+  timeline: unknown;
+  collaborating_club_ids: string[];
+};
+
 type ChatbotStoredMessage = {
   id: string;
   conversation_id: string;
@@ -135,76 +149,99 @@ export class ChatbotService {
         throw new BadRequestException('Le message ne peut pas être vide.');
       }
 
-      const [clubs, events, locaux, reservations] = await Promise.all([
-        this.prisma.clubs.findMany({
-          where: { est_actif: true },
-          select: {
-            id: true,
-            nom: true,
-            categorie: true,
-            description: true,
-            capacite: true,
-            locale_fixe: true,
-            est_actif: true,
-            centre: { select: { nom: true } },
-          },
-          orderBy: { nom: 'asc' },
-          take: 12,
-        }),
-        this.prisma.events.findMany({
-          where: {
-            is_active: true,
-            date_event: { gte: this.getTodayStart() },
-          },
-          select: {
-            id: true,
-            nom: true,
-            description: true,
-            date_event: true,
-            start_time: true,
-            end_time: true,
-            capacity: true,
-            club: { select: { nom: true } },
-            local: { select: { nom: true } },
-          },
-          orderBy: [{ date_event: 'asc' }, { start_time: 'asc' }],
-          take: 20,
-        }),
-        this.prisma.locaux.findMany({
-          where: { est_actif: true },
-          select: {
-            id: true,
-            nom: true,
-            type: true,
-            capacite: true,
-            localisation: true,
-            prix_heure: true,
-            est_actif: true,
-            centre: { select: { nom: true } },
-          },
-          orderBy: { nom: 'asc' },
-          take: 20,
-        }),
-        this.prisma.reservations_locaux.findMany({
-          where: {
-            date_reservation: {
-              gte: this.getTodayStart(),
-              lte: this.getLookaheadDate(),
+      const [clubs, events, locaux, reservations, eventRequests] =
+        await Promise.all([
+          this.prisma.clubs.findMany({
+            where: { est_actif: true },
+            select: {
+              id: true,
+              nom: true,
+              categorie: true,
+              description: true,
+              capacite: true,
+              locale_fixe: true,
+              est_actif: true,
+              centre: { select: { nom: true } },
             },
-          },
-          select: {
-            id: true,
-            date_reservation: true,
-            heure_debut: true,
-            heure_fin: true,
-            objet: true,
-            statut: true,
-            local: { select: { id: true, nom: true } },
-          },
-          orderBy: [{ date_reservation: 'asc' }, { heure_debut: 'asc' }],
-          take: 80,
-        }),
-      ]);
+            orderBy: { nom: 'asc' },
+            take: 12,
+          }),
+          this.prisma.events.findMany({
+            where: {
+              is_active: true,
+              date_event: { gte: this.getTodayStart() },
+            },
+            select: {
+              id: true,
+              nom: true,
+              description: true,
+              date_event: true,
+              start_time: true,
+              end_time: true,
+              capacity: true,
+              club: { select: { nom: true } },
+              local: { select: { nom: true } },
+            },
+            orderBy: [{ date_event: 'asc' }, { start_time: 'asc' }],
+            take: 20,
+          }),
+          this.prisma.locaux.findMany({
+            where: { est_actif: true },
+            select: {
+              id: true,
+              nom: true,
+              type: true,
+              capacite: true,
+              localisation: true,
+              prix_heure: true,
+              est_actif: true,
+              centre: { select: { nom: true } },
+            },
+            orderBy: { nom: 'asc' },
+            take: 20,
+          }),
+          this.prisma.reservations_locaux.findMany({
+            where: {
+              date_reservation: {
+                gte: this.getTodayStart(),
+                lte: this.getLookaheadDate(),
+              },
+            },
+            select: {
+              id: true,
+              date_reservation: true,
+              heure_debut: true,
+              heure_fin: true,
+              objet: true,
+              statut: true,
+              local: { select: { id: true, nom: true } },
+            },
+            orderBy: [{ date_reservation: 'asc' }, { heure_debut: 'asc' }],
+            take: 80,
+          }),
+          this.prisma.event_request_creations.findMany({
+            where: {
+              date_event: {
+                gte: this.getTodayStart(),
+              },
+            },
+            select: {
+              id: true,
+              nom: true,
+              date_event: true,
+              start_time: true,
+              end_time: true,
+              status: true,
+              capacity: true,
+              timeline: true,
+              collaborating_club_ids: true,
+              club: { select: { nom: true } },
+              local: { select: { nom: true } },
+            },
+            orderBy: [{ date_event: 'asc' }, { start_time: 'asc' }],
+            take: 40,
+          }),
+        ]);
 
       const botUserId = await this.getOrCreateChatbotUserId();
       const existingConversation = conversationId
@@ -216,24 +253,53 @@ export class ChatbotService {
       }
 
       const previousMessages = existingConversation
-        ? this.formatStoredMessages(existingConversation.messages, botUserId)
+        ? this.toGroqMessages(
+            this.formatStoredMessages(existingConversation.messages, botUserId),
+          )
         : this.normalizeHistory(history);
+
+      const scopeDecision = await this.classifyMessageScope(normalizedMessage);
+
+      if (!scopeDecision.inScope) {
+        return {
+          response: this.outOfScopeReply,
+          conversationId:
+            conversationId ??
+            existingConversation?.id ??
+            (
+              await this.createConversationWithMessages({
+                userId,
+                botUserId,
+                title: this.buildConversationTitle([
+                  { role: 'user', parts: [{ text: userMessage.trim() }] },
+                ]),
+                userMessage: userMessage.trim(),
+                assistantMessage: this.outOfScopeReply,
+              })
+            ).id,
+        };
+      }
 
       const localContexts = this.buildLocalContexts(
         locaux,
         events,
         reservations,
       );
-      const systemPrompt = this.buildSystemPrompt(clubs, events, localContexts);
+      const eventPlanningContexts =
+        this.buildEventPlanningContexts(eventRequests);
+      const systemPrompt = this.buildSystemPrompt(
+        clubs,
+        events,
+        localContexts,
+        eventPlanningContexts,
+      );
       const messages: any[] = [
         { role: 'system', content: systemPrompt },
         ...previousMessages,
         { role: 'user', content: userMessage.trim() },
       ];
 
-      const assistantReply = this.isInScope(normalizedMessage)
-        ? await this.generateGroqReply(messages)
-        : this.outOfScopeReply;
+      const assistantReply = await this.generateGroqReply(messages);
 
       const savedConversation = existingConversation
         ? await this.appendToExistingConversation({
@@ -506,18 +572,26 @@ export class ChatbotService {
       });
   }
 
+  private toGroqMessages(
+    history: ChatbotHistoryMessage[],
+  ): Array<{ role: 'user' | 'assistant'; content: string }> {
+    return this.normalizeHistory(history);
+  }
+
   private buildSystemPrompt(
     clubs: any[],
     events: any[],
     locaux: ChatbotLocalContext[],
+    eventRequests: ChatbotEventPlanningContext[],
   ) {
     return [
       "Tu es l'assistant officiel de notre plateforme associative en Tunisie.",
       "Réponds en français ou en derja tunisienne selon la langue de l'utilisateur.",
       'Tu ne réponds que sur la maison des jeunes et son périmètre métier.',
-      "Les seuls sujets autorisés sont: clubs, événements, locaux, disponibilité des locaux, activités de club, recommandation d'activités pour une séance, et informations présentes dans la base.",
+      "Les seuls sujets autorisés sont: clubs, événements, locaux, disponibilité des locaux, activités de club, recommandation d'activités pour une séance, et planification d'événements avec timeline.",
       'Appuie-toi uniquement sur les données de la base fournies ci-dessous pour répondre avec précision.',
       "Pour la disponibilité des locaux, considère qu'un local est occupé si un événement ou une réservation chevauche le créneau demandé.",
+      "Pour la planification d'événements, aide à structurer les étapes, les horaires, les ressources, les locaux et la timeline à partir des données fournies.",
       "Si une information n'est pas présente dans les données, dis-le clairement et propose de vérifier auprès de l'administration plutôt que d'inventer.",
       "Si l'utilisateur demande un sujet hors de ce périmètre, refuse poliment avec une phrase courte.",
       '',
@@ -525,26 +599,64 @@ export class ChatbotService {
       `CLUBS = ${JSON.stringify(clubs, null, 2)}`,
       `EVENEMENTS = ${JSON.stringify(events, null, 2)}`,
       `LOCAUX_ET_DISPONIBILITE = ${JSON.stringify(locaux, null, 2)}`,
+      `PLANIFICATION_EVENEMENTS = ${JSON.stringify(eventRequests, null, 2)}`,
     ].join('\n');
   }
 
-  private isInScope(message: string) {
-    const allowedPatterns = [
-      /\bclub(s)?\b/u,
-      /\bactivit(e|é|es|és)\b/u,
-      /\bseance|séance\b/u,
-      /\brecommand/i,
-      /\bevent(s)?\b/u,
-      /\b(e|é)v(e|é)nement(s)?\b/u,
-      /\blocal(aux)?\b/u,
-      /\bdisponibilit(e|é)\b/u,
-      /\br(e|é)servation(s)?\b/u,
-      /\bmaison des jeunes\b/u,
-      /\bmdj\b/u,
-      /\bcentre(s)?\b/u,
+  private buildEventPlanningContexts(
+    eventRequests: any[],
+  ): ChatbotEventPlanningContext[] {
+    return eventRequests.map((eventRequest) => ({
+      id: eventRequest.id,
+      nom: eventRequest.nom,
+      date_event: this.toDateString(eventRequest.date_event),
+      start_time: this.toIsoString(eventRequest.start_time),
+      end_time: this.toIsoString(eventRequest.end_time),
+      status: eventRequest.status,
+      capacity: eventRequest.capacity,
+      club: eventRequest.club?.nom ?? null,
+      local: eventRequest.local?.nom ?? null,
+      timeline: eventRequest.timeline,
+      collaborating_club_ids: eventRequest.collaborating_club_ids ?? [],
+    }));
+  }
+
+  private async classifyMessageScope(
+    userMessage: string,
+  ): Promise<{ inScope: boolean }> {
+    const classifierMessages = [
+      {
+        role: 'system' as const,
+        content:
+          "Tu es un classificateur d'intention. Réponds uniquement par IN_SCOPE ou OUT_OF_SCOPE. IN_SCOPE si le message concerne la maison des jeunes, les clubs, les événements, la planification d'événements, les timelines, les locaux, la disponibilité, les activités de club, les recommandations d'activités, ou toute aide liée à cette application. OUT_OF_SCOPE uniquement si le message parle d'un sujet extérieur à cette application.",
+      },
+      {
+        role: 'user' as const,
+        content: userMessage,
+      },
     ];
 
-    return allowedPatterns.some((pattern) => pattern.test(message));
+    try {
+      const groq = this.getGroqClient();
+      const result = await groq.chat.completions.create({
+        messages: classifierMessages,
+        model: this.model,
+        temperature: 0,
+      });
+
+      const rawDecision =
+        result.choices[0]?.message?.content?.trim().toUpperCase() ?? '';
+
+      return {
+        inScope: rawDecision !== 'OUT_OF_SCOPE',
+      };
+    } catch (error) {
+      console.warn(
+        'Classification scope failed, falling back to in-scope:',
+        error,
+      );
+      return { inScope: true };
+    }
   }
 
   private buildLocalContexts(

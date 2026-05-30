@@ -12,7 +12,60 @@ import { PrismaService } from 'src/prisma/prisma.service';
 export class SessionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private toSessionView(row: any): Session {
+  private async getLatestChosenActivity(
+    sessionId: number,
+  ): Promise<string | null> {
+    const latestChoice = await this.prisma.recommendation_history.findFirst({
+      where: { session_id: sessionId },
+      orderBy: { created_at: 'desc' },
+      select: { activite_choisie: true },
+    });
+
+    return latestChoice?.activite_choisie ?? null;
+  }
+
+  private resolveDomaine(categorie: string | null | undefined): string {
+    if (!categorie) {
+      return '';
+    }
+
+    const normalized = categorie.toLowerCase();
+
+    if (/sport|foot|basket|hand|volley|ping|natation|gym/.test(normalized)) {
+      return 'Sport';
+    }
+
+    if (
+      /art|peinture|dessin|sculpt|photo|vid|cin|musique|chant|danse|th[eé]/.test(
+        normalized,
+      )
+    ) {
+      return 'Arts';
+    }
+
+    if (/num[eé]rique|info|robot|bureau|web|code|tech/.test(normalized)) {
+      return 'Numérique';
+    }
+
+    if (/langue|litt[eé]r|lecture|po[eé]sie/.test(normalized)) {
+      return 'Culture';
+    }
+
+    if (/citoyen|enviro|leadership|entrep/.test(normalized)) {
+      return 'Citoyenneté';
+    }
+
+    if (/[eé]checs|strat/.test(normalized)) {
+      return 'Intellectuel';
+    }
+
+    return categorie;
+  }
+
+  private toSessionView(
+    row: any,
+    activiteChoisie: string | null = null,
+  ): Session {
     return {
       id: row.id,
       club_id: row.id_club,
@@ -20,8 +73,9 @@ export class SessionsService {
         id: row.club.id,
         nom: row.club.nom,
         nom_dataset: row.club.nom_dataset ?? null,
-        domaine: row.club.categorie,
+        domaine: this.resolveDomaine(row.club.categorie),
       },
+      activite_choisie: activiteChoisie,
       tranche_age: row.tranche_age,
       niveau: row.niveau,
       num_seance: row.num_seance,
@@ -130,7 +184,16 @@ export class SessionsService {
       orderBy: { created_at: 'desc' },
     });
 
-    return rows.map((row) => this.toSessionView(row));
+    const enrichedRows = await Promise.all(
+      rows.map(async (row) => ({
+        row,
+        activiteChoisie: await this.getLatestChosenActivity(row.id),
+      })),
+    );
+
+    return enrichedRows.map(({ row, activiteChoisie }) =>
+      this.toSessionView(row, activiteChoisie),
+    );
   }
 
   async findOne(id: number): Promise<Session> {
@@ -152,7 +215,8 @@ export class SessionsService {
       throw new NotFoundException(`Session ${id} introuvable`);
     }
 
-    return this.toSessionView(row);
+    const activiteChoisie = await this.getLatestChosenActivity(row.id);
+    return this.toSessionView(row, activiteChoisie);
   }
 
   async update(
@@ -184,7 +248,8 @@ export class SessionsService {
       },
     });
 
-    return this.toSessionView(updated);
+    const activiteChoisie = await this.getLatestChosenActivity(updated.id);
+    return this.toSessionView(updated, activiteChoisie);
   }
 
   async remove(id: number): Promise<{ deleted: boolean }> {
