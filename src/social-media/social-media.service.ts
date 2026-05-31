@@ -938,7 +938,10 @@ export class SocialMediaService {
 
     const authorLabel =
       `${sourcePost.user.nom} ${sourcePost.user.prenom}`.trim();
-    const sourceContent = sourcePost.content?.trim() ?? '';
+    const sourceContent = (sourcePost.content ?? '')
+      .replace(/\[\[shared:[^\]]*\]\]/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
     const userMessage = dto.message?.trim() ?? '';
     const sharePayload = {
       author: authorLabel,
