@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
@@ -16,6 +17,8 @@ import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { StripeService } from './stripe.service';
 import { AuthGuard } from '@nestjs/passport';
+import { Roles } from 'src/auth/roles.decorator';
+import { RolesGuard } from 'src/auth/roles.guard';
 
 @Controller('payments')
 export class PaymentsController {
@@ -31,10 +34,22 @@ export class PaymentsController {
   async getMyPayments(@Req() req) {
     const userId = req.user.userId;
     const userRole = req.user.role;
-    
-    this.logger.log(`Getting payments for user ${userId} with role ${userRole}`);
-    
+
+    this.logger.log(
+      `Getting payments for user ${userId} with role ${userRole}`,
+    );
+
     return await this.payments.getUserPayments(userId, userRole);
+  }
+
+  @Get('admin/centre-revenues')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN')
+  async getCentreRevenues(
+    @Query('scope') scope?: string,
+    @Query('month') month?: string,
+  ) {
+    return await this.payments.getAdminCentreRevenueOverview(scope, month);
   }
 
   @Post('create')
@@ -51,15 +66,19 @@ export class PaymentsController {
   }
 
   @Post('pay-reservation')
-  async payReservation(@Body() body: { reservationId: string; returnUrl?: string }) {
+  async payReservation(
+    @Body() body: { reservationId: string; returnUrl?: string },
+  ) {
     const { reservationId, returnUrl } = body;
-    
+
     // Récupérer les détails de la réservation
-    const reservation = await this.payments['prisma'].reservations_locaux.findUnique({
+    const reservation = await this.payments[
+      'prisma'
+    ].reservations_locaux.findUnique({
       where: { id: reservationId },
       include: {
         local: true,
-      }
+      },
     });
 
     if (!reservation) {
@@ -77,10 +96,10 @@ export class PaymentsController {
       returnUrl || 'http://localhost:5173/reservations/my-reservations',
     );
 
-    return { 
-      checkoutUrl: result.checkoutUrl, 
+    return {
+      checkoutUrl: result.checkoutUrl,
       paymentId: result.payment.id,
-      amount: reservation.prix_total
+      amount: reservation.prix_total,
     };
   }
 
@@ -92,10 +111,10 @@ export class PaymentsController {
     @Headers('stripe-signature') signature: string,
   ) {
     this.logger.log('Webhook received - Starting processing');
-    
+
     const raw = (req as any).rawBody ?? JSON.stringify(req.body);
     this.logger.log('Raw body length:', raw.length);
-    
+
     let event;
     try {
       event = JSON.parse(raw);
@@ -111,7 +130,7 @@ export class PaymentsController {
       this.logger.error('Webhook signature verification failed');
       return res.status(400).send({ ok: false, message: 'Invalid signature' });
     }
-    
+
     this.logger.log('Webhook signature verified successfully');
 
     try {
