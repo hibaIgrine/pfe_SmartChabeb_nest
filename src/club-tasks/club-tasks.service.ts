@@ -30,6 +30,7 @@ export class ClubTasksService {
       select: {
         id: true,
         nom: true,
+        id_coach: true,
       },
     },
     createur: {
@@ -746,6 +747,21 @@ export class ClubTasksService {
       nextStatus,
       role: effectiveRole,
     });
+
+    // VALIDEE / REFUSE : seul le responsable principal (id_coach) du club peut statuer
+    if (['VALIDEE', 'REFUSE'].includes(nextStatus)) {
+      if (effectiveRole !== 'ADMIN') {
+        const club = await this.prisma.clubs.findUnique({
+          where: { id: clubId },
+          select: { id_coach: true },
+        });
+        if (club?.id_coach !== userId) {
+          throw new ForbiddenException(
+            'Seul le responsable du club peut valider ou refuser une tâche',
+          );
+        }
+      }
+    }
 
     let updated: any = task;
 

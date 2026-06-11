@@ -125,19 +125,7 @@ export class PresencesService {
 
     const whereClause =
       user.role === 'RESPONSABLE_CLUB'
-        ? {
-            OR: [
-              { id_coach: userId },
-              {
-                staff: {
-                  some: {
-                    id_utilisateur: userId,
-                    is_active: true,
-                  },
-                },
-              },
-            ],
-          }
+        ? { id_coach: userId }
         : { id_centre: user.id_centre || '__NO_CENTRE__' };
 
     return await this.prisma.clubs.findMany({
