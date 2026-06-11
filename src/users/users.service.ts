@@ -426,7 +426,7 @@ export class UsersService {
         if (!responsable || !responsable.id_centre) return [];
 
         return await this.prisma.utilisateurs.findMany({
-          where: { id_centre: responsable.id_centre },
+          where: { id_centre: responsable.id_centre, NOT: { role: 'CHATBOT' } },
           include: {
             centre: {
               select: { id: true, nom: true, gouvernorat: true },
@@ -442,6 +442,7 @@ export class UsersService {
 
       // 🛡️ CAS DE L'ADMIN : Vue globale
       return await this.prisma.utilisateurs.findMany({
+        where: { NOT: { role: 'CHATBOT' } },
         include: {
           centre: {
             select: { id: true, nom: true, gouvernorat: true },
