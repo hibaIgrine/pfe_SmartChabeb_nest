@@ -68,9 +68,16 @@ export class EventsController {
   getDashboardStats(
     @Request() req: any,
     @Query('includeInactive') includeInactive?: string,
+    @Query('centreId') centreId?: string,
+    @Query('gouvernorat') gouvernorat?: string,
   ) {
     const include = String(includeInactive).toLowerCase() === 'true';
-    return this.eventsService.getDashboardStats(req.user.userId, include);
+    return this.eventsService.getDashboardStats(
+      req.user.userId,
+      include,
+      centreId || undefined,
+      gouvernorat || undefined,
+    );
   }
 
   @Get(':id')

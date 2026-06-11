@@ -770,12 +770,19 @@ export class EventsService {
     });
   }
 
-  async getDashboardStats(userId: string, includeInactive = false) {
+  async getDashboardStats(userId: string, includeInactive = false, centreId?: string, gouvernorat?: string) {
     const requester = await this.resolveRequester(userId);
     const where = await this.buildVisibilityWhere(requester, includeInactive);
 
+    let locationFilter: Record<string, any> = {};
+    if (centreId) {
+      locationFilter = { local: { id_centre: centreId } };
+    } else if (gouvernorat) {
+      locationFilter = { local: { centre: { gouvernorat } } };
+    }
+
     const events = await this.prisma.events.findMany({
-      where,
+      where: Object.keys(locationFilter).length ? { ...where, ...locationFilter } : where,
       select: {
         id: true,
         nom: true,
