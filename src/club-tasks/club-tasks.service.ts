@@ -208,24 +208,14 @@ export class ClubTasksService {
     const next = this.normalizeTaskStatus(params.nextStatus);
     const role = (params.role || '').toUpperCase();
 
-    if (current === next) {
-      return;
-    }
+    if (current === next) return;
 
     const isManager =
       role === 'RESPONSABLE_CLUB' ||
       role === 'RESPONSABLE_CENTRE' ||
       role === 'ADMIN';
 
-    if (isManager) {
-      if (current !== 'TERMINE' || !['VALIDEE', 'REFUSE'].includes(next)) {
-        throw new BadRequestException(
-          'Le responsable ne peut valider ou refuser qu une tache terminee',
-        );
-      }
-      return;
-    }
-
+    // Commencer : EN_ATTENTE → EN_COURS (tout membre affecté, vérifié dans updateStatus)
     if (next === 'EN_COURS') {
       if (current !== 'EN_ATTENTE') {
         throw new BadRequestException(
@@ -235,6 +225,7 @@ export class ClubTasksService {
       return;
     }
 
+    // Terminer : EN_COURS → TERMINE (tout membre affecté, vérifié dans updateStatus)
     if (next === 'TERMINE') {
       if (current !== 'EN_COURS') {
         throw new BadRequestException(
@@ -244,6 +235,22 @@ export class ClubTasksService {
       return;
     }
 
+    // Valider / Refuser : réservé aux responsables, seulement depuis TERMINE
+    if (['VALIDEE', 'REFUSE'].includes(next)) {
+      if (!isManager) {
+        throw new ForbiddenException(
+          'Seul un responsable peut valider ou refuser une tache',
+        );
+      }
+      if (current !== 'TERMINE') {
+        throw new BadRequestException(
+          'Le responsable ne peut valider ou refuser qu une tache terminee',
+        );
+      }
+      return;
+    }
+
+    // Annuler
     if (next === 'ANNULE') {
       if (!['EN_ATTENTE', 'EN_COURS'].includes(current)) {
         throw new BadRequestException(
@@ -725,15 +732,9 @@ export class ClubTasksService {
     }
 
     const effectiveRole = (role || currentUser.role || '').toUpperCase();
-    const isManager = [
-      'RESPONSABLE_CLUB',
-      'RESPONSABLE_CENTRE',
-      'ADMIN',
-    ].includes(effectiveRole);
 
-    const task = isManager
-      ? await this.getTaskForStatusChange(taskId, clubId)
-      : await this.getTaskByClubAndUser(taskId, clubId, userId);
+    // Récupère la tâche sans filtre d'affectation (la vérification se fait ci-dessous)
+    const task = await this.getTaskForStatusChange(taskId, clubId);
 
     if (!task) {
       throw new NotFoundException('Tache introuvable');
@@ -747,6 +748,19 @@ export class ClubTasksService {
       nextStatus,
       role: effectiveRole,
     });
+
+    // EN_COURS / TERMINE : l'utilisateur doit être affecté à la tâche (quel que soit son rôle)
+    if (['EN_COURS', 'TERMINE'].includes(nextStatus)) {
+      const assigned = await this.prisma.club_tache_affectations.findFirst({
+        where: { id_tache: taskId, id_utilisateur: userId },
+        select: { id: true },
+      });
+      if (!assigned) {
+        throw new ForbiddenException(
+          'Seuls les membres affectés à la tâche peuvent la commencer ou la terminer',
+        );
+      }
+    }
 
     // VALIDEE / REFUSE : seul le responsable principal (id_coach) du club peut statuer
     if (['VALIDEE', 'REFUSE'].includes(nextStatus)) {
@@ -765,8 +779,8 @@ export class ClubTasksService {
 
     let updated: any = task;
 
-    // If a staff (non-manager) marks task as TERMINE, require proofs and persist them atomically.
-    if (nextStatus === 'TERMINE' && !isManager) {
+    // Tout membre affecté qui marque TERMINE doit soumettre des preuves
+    if (nextStatus === 'TERMINE') {
       const proofs = (dto as any).proofs as
         | Array<{ url: string; type?: string; filename?: string }>
         | undefined;
@@ -867,7 +881,7 @@ export class ClubTasksService {
 
     // If a manager validated or refused a task (transition TERMINE -> VALIDEE|REFUSE),
     // notify all assigned staff about the decision.
-    if (isManager && (nextStatus === 'VALIDEE' || nextStatus === 'REFUSE')) {
+    if (nextStatus === 'VALIDEE' || nextStatus === 'REFUSE') {
       const actorName = await this.getUserFullName(userId);
       const decision = nextStatus === 'VALIDEE' ? 'validee' : 'refusee';
 
