@@ -63,6 +63,10 @@ export class ReservationsService {
         local: {
           id_centre: requester.id_centre,
         },
+        AND: [
+          { NOT: { objet: { startsWith: 'Réservation pour événement:' } } },
+          { NOT: { objet: { startsWith: 'Créneau club validé:' } } },
+        ],
       };
     }
 
