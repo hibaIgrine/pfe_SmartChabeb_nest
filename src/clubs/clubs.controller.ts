@@ -155,6 +155,13 @@ export class ClubsController {
     );
   }
 
+  @Patch(':id/assign-coach')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE')
+  async assignCoach(@Param('id') id: string, @Body('coachId') coachId: string | null) {
+    return this.clubsService.assignCoach(id, coachId ?? null);
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: any) {
     return this.clubsService.update(id, body);

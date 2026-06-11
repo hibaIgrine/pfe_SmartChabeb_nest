@@ -178,26 +178,29 @@ export class UsersController {
   }
 
   @Patch(':id/role')
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  async changeRole(@Param('id') id: string, @Body() body: ChangeRoleDto) {
-    return await this.usersService.updateStatus(id, { role: body.role });
+  async changeRole(@Param('id') id: string, @Body() body: ChangeRoleDto, @Request() req: any) {
+    return await this.usersService.changeRole(id, body.role, req.user.userId, req.user.role);
   }
 
   @Patch(':id/status')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles('ADMIN')
-  async changeStatus(@Param('id') id: string, @Body() body: ChangeStatusDto) {
-    return await this.usersService.updateStatus(id, {
-      compte_actif: body.compte_actif,
-    });
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE')
+  async changeStatus(@Param('id') id: string, @Body() body: ChangeStatusDto, @Request() req: any) {
+    return await this.usersService.changeStatus(
+      id,
+      body.compte_actif,
+      req.user.userId,
+      req.user.role,
+    );
   }
 
   @Patch(':id/ban')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles('ADMIN')
-  async banUser(@Param('id') id: string, @Body() body: BanUserDto) {
-    return await this.usersService.banUser(id, body.days, body.reason);
+  @Roles('ADMIN', 'RESPONSABLE_CENTRE')
+  async banUser(@Param('id') id: string, @Body() body: BanUserDto, @Request() req: any) {
+    return await this.usersService.banUser(id, body.days, body.reason, req.user.userId, req.user.role);
   }
 
   @Patch(':id/assign-centre') // 💡 salle -> centre

@@ -828,6 +828,13 @@ export class ClubsService {
     };
   }
 
+  async assignCoach(clubId: string, coachId: string | null) {
+    return await this.prisma.clubs.update({
+      where: { id: clubId },
+      data: { id_coach: coachId },
+    });
+  }
+
   async update(id: string, data: any) {
     let finalLogoUrl = data.logo_url;
     if (finalLogoUrl && finalLogoUrl.startsWith('data:image')) {

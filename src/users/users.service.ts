@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
   NotFoundException,
@@ -622,7 +623,79 @@ export class UsersService {
   // ==========================================
   // 4. ACTIONS ADMINISTRATIVES (Ban, Role, Centre)
   // ==========================================
-  async banUser(id: string, days: number, reason: string) {
+  async changeRole(
+    targetId: string,
+    role: string,
+    requesterId?: string,
+    requesterRole?: string,
+  ) {
+    if (requesterRole === 'RESPONSABLE_CENTRE') {
+      const allowedRoles = ['ADHERENT', 'RESPONSABLE_CLUB'];
+      if (!allowedRoles.includes(role.toUpperCase())) {
+        throw new ForbiddenException(
+          'Vous ne pouvez attribuer que les rôles Adhérent ou Responsable Club',
+        );
+      }
+
+      const [requester, target] = await Promise.all([
+        this.prisma.utilisateurs.findUnique({
+          where: { id: requesterId },
+          select: { id_centre: true },
+        }),
+        this.prisma.utilisateurs.findUnique({
+          where: { id: targetId },
+          select: { id_centre: true, role: true },
+        }),
+      ]);
+
+      if (!requester?.id_centre || requester.id_centre !== target?.id_centre) {
+        throw new ForbiddenException(
+          'Vous ne pouvez gérer que les membres de votre centre',
+        );
+      }
+
+      if (['ADMIN', 'RESPONSABLE_CENTRE'].includes(target?.role ?? '')) {
+        throw new ForbiddenException(
+          'Vous ne pouvez pas modifier le rôle de cet utilisateur',
+        );
+      }
+    }
+
+    return await this.updateStatus(targetId, { role });
+  }
+
+  async banUser(
+    id: string,
+    days: number,
+    reason: string,
+    requesterId?: string,
+    requesterRole?: string,
+  ) {
+    if (requesterRole === 'RESPONSABLE_CENTRE') {
+      const [requester, target] = await Promise.all([
+        this.prisma.utilisateurs.findUnique({
+          where: { id: requesterId },
+          select: { id_centre: true },
+        }),
+        this.prisma.utilisateurs.findUnique({
+          where: { id },
+          select: { id_centre: true, role: true },
+        }),
+      ]);
+
+      if (!requester?.id_centre || requester.id_centre !== target?.id_centre) {
+        throw new ForbiddenException(
+          'Vous ne pouvez bloquer que les membres de votre centre',
+        );
+      }
+
+      if (['ADMIN', 'RESPONSABLE_CENTRE'].includes(target?.role ?? '')) {
+        throw new ForbiddenException(
+          'Vous ne pouvez pas bloquer cet utilisateur',
+        );
+      }
+    }
+
     const finBan = new Date();
     finBan.setDate(finBan.getDate() + days);
     return await this.prisma.utilisateurs.update({
@@ -648,6 +721,40 @@ export class UsersService {
         inscriptions_clubs: { include: { club: true } },
       },
     });
+  }
+
+  async changeStatus(
+    targetId: string,
+    active: boolean,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    if (requesterRole === 'RESPONSABLE_CENTRE') {
+      const [requester, target] = await Promise.all([
+        this.prisma.utilisateurs.findUnique({
+          where: { id: requesterId },
+          select: { id_centre: true },
+        }),
+        this.prisma.utilisateurs.findUnique({
+          where: { id: targetId },
+          select: { id_centre: true, role: true },
+        }),
+      ]);
+
+      if (!requester?.id_centre || requester.id_centre !== target?.id_centre) {
+        throw new ForbiddenException(
+          'Vous ne pouvez gérer que les membres de votre centre',
+        );
+      }
+
+      if (['ADMIN', 'RESPONSABLE_CENTRE'].includes(target?.role ?? '')) {
+        throw new ForbiddenException(
+          'Vous ne pouvez pas modifier le statut de cet utilisateur',
+        );
+      }
+    }
+
+    return await this.updateStatus(targetId, { compte_actif: active });
   }
 
   async assignToCentreByEmail(email: string, id_centre: string) {
