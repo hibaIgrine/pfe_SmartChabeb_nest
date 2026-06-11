@@ -52,6 +52,17 @@ export class PaymentsController {
     return await this.payments.getAdminCentreRevenueOverview(scope, month);
   }
 
+  @Get('centre/revenues')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('RESPONSABLE_CENTRE')
+  async getMyCentreRevenues(
+    @Req() req,
+    @Query('scope') scope?: string,
+    @Query('month') month?: string,
+  ) {
+    return await this.payments.getCentreRevenueForResponsable(req.user.userId, scope, month);
+  }
+
   @Post('create')
   async create(@Body() body: CreatePaymentDto) {
     const { reservationId, amount, returnUrl } = body as any;

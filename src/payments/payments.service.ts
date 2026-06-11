@@ -361,6 +361,105 @@ export class PaymentsService {
     };
   }
 
+  async getCentreRevenueForResponsable(userId: string, scope?: string, month?: string) {
+    const user = await this.prisma.utilisateurs.findUnique({
+      where: { id: userId },
+      select: { id_centre: true },
+    });
+
+    const centreId = user?.id_centre;
+    if (!centreId) {
+      return {
+        scope: 'global',
+        month: null,
+        label: 'global',
+        totalAmount: 0,
+        totalPayments: 0,
+        centre: null,
+        locaux: [],
+        generatedAt: new Date().toISOString(),
+      };
+    }
+
+    const normalizedScope = scope === 'month' ? 'month' : 'global';
+    const monthRange = this.buildMonthRange(month);
+
+    const centre = await this.prisma.centres.findUnique({
+      where: { id: centreId },
+      select: { id: true, nom: true, gouvernorat: true },
+    });
+
+    const payments = await this.prisma.payments.findMany({
+      where: {
+        status: 'PAID',
+        reservation: { local: { id_centre: centreId } },
+        ...(normalizedScope === 'month'
+          ? { created_at: { gte: monthRange.start, lte: monthRange.end } }
+          : {}),
+      },
+      select: {
+        id: true,
+        amount: true,
+        reservation: {
+          select: {
+            id: true,
+            local: { select: { id: true, nom: true } },
+          },
+        },
+      },
+    });
+
+    const revenueByLocal = new Map<
+      string,
+      { id: string; nom: string; totalAmount: number; paymentCount: number; reservationIds: Set<string> }
+    >();
+
+    let totalAmount = 0;
+
+    for (const payment of payments) {
+      const local = payment.reservation?.local;
+      if (!local) continue;
+
+      const current = revenueByLocal.get(local.id) ?? {
+        id: local.id,
+        nom: local.nom,
+        totalAmount: 0,
+        paymentCount: 0,
+        reservationIds: new Set<string>(),
+      };
+
+      const amount = Number(payment.amount) || 0;
+      current.totalAmount += amount;
+      current.paymentCount += 1;
+      current.reservationIds.add(payment.reservation.id);
+      revenueByLocal.set(local.id, current);
+      totalAmount += amount;
+    }
+
+    const locaux = [...revenueByLocal.values()]
+      .map((l) => ({
+        id: l.id,
+        nom: l.nom,
+        totalAmount: Number(l.totalAmount.toFixed(2)),
+        paymentCount: l.paymentCount,
+        reservationCount: l.reservationIds.size,
+      }))
+      .sort((a, b) => b.totalAmount - a.totalAmount);
+
+    return {
+      scope: normalizedScope,
+      month: normalizedScope === 'month' ? monthRange.label : null,
+      label: normalizedScope === 'month' ? monthRange.label : 'global',
+      totalAmount: Number(totalAmount.toFixed(2)),
+      totalPayments: payments.length,
+      centre: centre
+        ? { id: centre.id, nom: centre.nom, gouvernorat: centre.gouvernorat ?? null }
+        : null,
+      locaux,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
   private async handleExpiredPayment(session: any) {
     const payment = await this.prisma.payments.findFirst({
       where: { stripe_session_id: session.id },
