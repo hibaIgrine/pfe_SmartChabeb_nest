@@ -463,7 +463,12 @@ export class UsersService {
   async findAllForMessaging(requesterId?: string) {
     try {
       return await this.prisma.utilisateurs.findMany({
-        where: requesterId ? { id: { not: requesterId } } : undefined,
+        where: {
+          compte_actif: true,
+          role: { not: 'CHATBOT' },
+          nom: { not: '' },
+          ...(requesterId ? { id: { not: requesterId } } : {}),
+        },
         select: {
           id: true,
           nom: true,
