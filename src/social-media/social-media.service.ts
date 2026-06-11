@@ -879,7 +879,7 @@ export class SocialMediaService {
     return postWithFavorite;
   }
 
-  async deletePost(postId: string, userId: string) {
+  async deletePost(postId: string, userId: string, isAdmin = false) {
     const post = await this.prisma.posts.findUnique({
       where: { id: postId },
       select: { id: true, user_id: true },
@@ -889,7 +889,7 @@ export class SocialMediaService {
       throw new NotFoundException('Publication introuvable');
     }
 
-    if (post.user_id !== userId) {
+    if (!isAdmin && post.user_id !== userId) {
       throw new ForbiddenException(
         'Vous ne pouvez pas supprimer cette publication',
       );
@@ -1287,7 +1287,7 @@ export class SocialMediaService {
     });
   }
 
-  async deleteComment(postId: string, commentId: string, userId: string) {
+  async deleteComment(postId: string, commentId: string, userId: string, isAdmin = false) {
     const comment = await this.prisma.comments.findUnique({
       where: { id: commentId },
       select: {
@@ -1301,7 +1301,7 @@ export class SocialMediaService {
       throw new NotFoundException('Commentaire introuvable');
     }
 
-    if (comment.user_id !== userId) {
+    if (!isAdmin && comment.user_id !== userId) {
       throw new ForbiddenException(
         'Vous ne pouvez pas supprimer ce commentaire',
       );

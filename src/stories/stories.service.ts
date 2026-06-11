@@ -289,12 +289,11 @@ export class StoriesService {
   /**
    * Supprimer une story
    */
-  async deleteStory(storyId: string, userId: string) {
+  async deleteStory(storyId: string, userId: string, isAdmin = false) {
     return this.prisma.stories.deleteMany({
-      where: {
-        id: storyId,
-        user_id: userId,
-      },
+      where: isAdmin
+        ? { id: storyId }
+        : { id: storyId, user_id: userId },
     });
   }
 

@@ -68,7 +68,7 @@ export class SocialMediaController {
 
   @Delete('posts/:id')
   deletePost(@Param('id') id: string, @Request() req: any) {
-    return this.socialMediaService.deletePost(id, req.user.userId);
+    return this.socialMediaService.deletePost(id, req.user.userId, req.user.role === 'ADMIN');
   }
 
   @Post('posts/:id/share')
@@ -119,6 +119,7 @@ export class SocialMediaController {
       postId,
       commentId,
       req.user.userId,
+      req.user.role === 'ADMIN',
     );
   }
 

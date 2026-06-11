@@ -55,6 +55,6 @@ export class StoriesController {
   @UseGuards(AuthGuard('jwt'))
   async deleteStory(@Param('storyId') storyId: string, @Request() req) {
     const userId = req.user.userId;
-    return this.storiesService.deleteStory(storyId, userId);
+    return this.storiesService.deleteStory(storyId, userId, req.user.role === 'ADMIN');
   }
 }
