@@ -607,6 +607,8 @@ export class ClubsService {
             statut: true,
             date_adhesion: true,
             est_suspendu: true,
+            motif_suspension: true,
+            date_fin_suspension: true,
           },
         },
         _count: {
@@ -705,6 +707,8 @@ export class ClubsService {
             statut: true,
             date_adhesion: true,
             est_suspendu: true,
+            motif_suspension: true,
+            date_fin_suspension: true,
           },
         },
         _count: {
