@@ -1,3 +1,60 @@
+/**
+ * ============================================================
+ * FICHIER : payments.service.ts
+ * RÔLE    : Logique métier paiements — orchestration BDD + Stripe.
+ * ============================================================
+ *
+ * MÉTHODES PUBLIQUES :
+ *
+ *   createPaymentAndSession(reservationId, amount, returnUrl)
+ *     Pipeline : 1. INSERT payments (PENDING) → 2. Stripe session → 3. UPDATE stripe_session_id
+ *     Retourne : { payment, session, checkoutUrl }
+ *     Le payment.id sert de référence Stripe (metadata.reference).
+ *
+ *   handleWebhookEvent(event)
+ *     Dispatch par event.type :
+ *       checkout.session.completed → handleSuccessfulPayment()
+ *       checkout.session.expired   → handleExpiredPayment()
+ *       payment_intent.succeeded / charge.succeeded → log (déjà géré par completed)
+ *       payment_intent.created / charge.updated     → log informatif
+ *       Autres → log "unhandled"
+ *
+ *   getUserPayments(userId, userRole)
+ *     ADMIN → tous les payments PAID avec reservation+local+centre
+ *     Autres → PAID filtrés par reservation.id_utilisateur = userId
+ *     Retourne : tableau formaté (payment_method hardcodé à 'stripe')
+ *
+ *   getAdminCentreRevenueOverview(scope?, month?)
+ *     scope='month' → filtre sur monthRange; sinon global (tous les PAID)
+ *     Agrège par centre via Map<centreId, {...}> en JS (pas de GROUP BY SQL)
+ *     Inclut les centres sans paiement (totalAmount=0) grâce à findMany(centres) initial
+ *     Retourne : { scope, month, label, totalAmount, totalPayments, centres[], generatedAt }
+ *
+ *   getCentreRevenueForResponsable(userId, scope?, month?)
+ *     Récupère id_centre de l'utilisateur, filtre payments par local.id_centre
+ *     Agrège par local via Map<localId, {...}>
+ *     Retourne : { scope, month, label, totalAmount, totalPayments, centre{...}, locaux[], generatedAt }
+ *
+ * MÉTHODES PRIVÉES :
+ *
+ *   handleSuccessfulPayment(session)
+ *     Cherche payment par stripe_session_id → UPDATE status=PAID, stripe_payment_id=session.payment_intent
+ *     Puis UPDATE reservations_locaux SET statut='CONFIRME'
+ *     Si réservation introuvable (err catch) → log warn, pas de throw
+ *
+ *   handleExpiredPayment(session)
+ *     Cherche payment par stripe_session_id → UPDATE status=CANCELLED
+ *     Ne modifie pas la réservation (l'utilisateur peut réessayer)
+ *
+ *   buildMonthRange(monthInput?)
+ *     Parsé 'YYYY-MM' → { start: Date(année, mois-1, 1), end: Date(année, mois, 0 = dernier jour) }
+ *     Si monthInput invalide → mois courant par défaut
+ *     end.setHours(23,59,59,999) pour inclure tout le dernier jour
+ *
+ * TABLE PRISMA PRINCIPALE : payments
+ *   id, reservation_id, amount, status, stripe_session_id, stripe_payment_id, created_at, updated_at
+ */
+
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from './stripe.service';
@@ -10,6 +67,11 @@ export class PaymentsService {
     private stripe: StripeService,
   ) {}
 
+  /**
+   * Crée un paiement PENDING en BDD puis une session Stripe Checkout.
+   * Pipeline : INSERT payments → Stripe.createCheckoutSession → UPDATE stripe_session_id
+   * Le payment.id est utilisé comme 'reference' dans les metadata Stripe.
+   */
   async createPaymentAndSession(
     reservationId: string,
     amount: number,
@@ -42,6 +104,11 @@ export class PaymentsService {
     return { payment, session, checkoutUrl };
   }
 
+  /**
+   * Dispatch les événements Stripe reçus par le webhook.
+   * checkout.session.completed → PAID + réservation CONFIRME
+   * checkout.session.expired   → CANCELLED
+   */
   async handleWebhookEvent(event: any) {
     this.logger.log(`Processing webhook event: ${event.type}`);
 
@@ -74,6 +141,11 @@ export class PaymentsService {
     return { ok: true };
   }
 
+  /**
+   * Traite un paiement réussi : met le payment à PAID et la réservation à CONFIRME.
+   * Recherche par stripe_session_id (sauvegardé lors de createPaymentAndSession).
+   * L'échec de mise à jour de la réservation est loggé en warn sans rethrow.
+   */
   private async handleSuccessfulPayment(session: any) {
     this.logger.log('Looking for payment with session id:', session.id);
 
@@ -130,6 +202,11 @@ export class PaymentsService {
     }
   }
 
+  /**
+   * Retourne les paiements PAID visibles par l'utilisateur.
+   * ADMIN → tous les paiements PAID ; autres → filtre par reservation.id_utilisateur.
+   * Inclut les détails de la réservation, du local et du centre.
+   */
   async getUserPayments(userId: string, userRole: string) {
     this.logger.log(
       `Getting payments for user ${userId} with role ${userRole}`,
@@ -212,6 +289,11 @@ export class PaymentsService {
     }));
   }
 
+  /**
+   * Construit { start, end, label } pour un mois donné en format 'YYYY-MM'.
+   * Si monthInput est invalide ou absent → mois courant par défaut.
+   * end est mis à 23:59:59.999 pour inclure toute la journée du dernier jour du mois.
+   */
   private buildMonthRange(monthInput?: string) {
     const [yearPart, monthPart] = (monthInput || '').split('-');
     const year = Number(yearPart);
@@ -240,6 +322,12 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * Revenus de tous les centres pour l'ADMIN.
+   * Charge tous les centres d'abord (findMany) pour avoir les entrées à 0 dans le résultat.
+   * Agrège via Map<centreId, stats> en JS — pas de GROUP BY SQL.
+   * Retourne les centres triés par totalAmount décroissant.
+   */
   async getAdminCentreRevenueOverview(scope?: string, month?: string) {
     const normalizedScope = scope === 'month' ? 'month' : 'global';
     const monthRange = this.buildMonthRange(month);
@@ -361,6 +449,11 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * Revenus du centre du responsable connecté, ventilés par local.
+   * Si l'utilisateur n'a pas de id_centre → retourne un objet vide cohérent.
+   * Agrège via Map<localId, stats> en JS. Locaux triés par totalAmount décroissant.
+   */
   async getCentreRevenueForResponsable(userId: string, scope?: string, month?: string) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { id: userId },
@@ -460,6 +553,10 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * Traite une session expirée : met le payment à CANCELLED.
+   * La réservation reste inchangée — l'utilisateur peut tenter un nouveau paiement.
+   */
   private async handleExpiredPayment(session: any) {
     const payment = await this.prisma.payments.findFirst({
       where: { stripe_session_id: session.id },

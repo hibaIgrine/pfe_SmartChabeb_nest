@@ -1,3 +1,28 @@
+/**
+ * DTO pour créer une publication.
+ *
+ * RÈGLE DE CONTENU (ensurePublicationContent) :
+ *   Au moins un champ parmi content, media, location, hashtags ou mentioned_user_ids
+ *   doit être fourni. Une publication entièrement vide est refusée (BadRequestException).
+ *
+ * VISIBILITÉ :
+ *   PUBLIC  (défaut) → visible par tous.
+ *   PRIVATE → visible uniquement par l'auteur et ses followers (user_follows).
+ *   MASKED  → visible par tous SAUF les utilisateurs listés dans hidden_user_ids
+ *             (stockés dans post_hidden_users).
+ *
+ * HASHTAGS :
+ *   Normalisés : toLowerCase, suppression des #, espaces→_, dédupliqués.
+ *   Ex: ["#React JS", "nestjs"] → ["react_js", "nestjs"].
+ *
+ * MÉDIA :
+ *   Tableau de PublicationMediaItemDto { type: image|video|document, url, name? }.
+ *   Limité à 10 éléments.
+ *
+ * PARTAGE (sharePost) :
+ *   Un post partagé a un contenu avec token [[shared:<base64>]] généré automatiquement
+ *   par sharePost(). Ce DTO n'est pas utilisé pour le partage.
+ */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayUnique,

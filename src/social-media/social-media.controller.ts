@@ -1,3 +1,81 @@
+/**
+ * ============================================================
+ * FICHIER : social-media.controller.ts
+ * RÔLE    : Routes HTTP REST du réseau social.
+ * ============================================================
+ *
+ * BASE URL : /social-media
+ * Tout le controller est protégé par @UseGuards(AuthGuard('jwt')) → JWT obligatoire.
+ *
+ * ROUTES EXPOSÉES :
+ *
+ *   POST   /social-media/posts                              body: CreatePostDto
+ *     → Crée une publication. Au moins un champ requis (content/media/location/hashtag/mention).
+ *
+ *   GET    /social-media/posts                              ?limit=20&offset=0
+ *     → Fil d'actualité paginé, filtré selon visibilité + utilisateurs masqués.
+ *       Chaque post est enrichi de réactions et méta-favoris (is_favorite, favorite_count).
+ *
+ *   GET    /social-media/posts/:id
+ *     → Détail d'un post avec commentaires. Vérifie la visibilité (ensurePostVisibleToUser).
+ *
+ *   GET    /social-media/users/:id/posts                    ?limit=20&offset=0
+ *     → Publications d'un utilisateur spécifique, filtré selon relation follower + masquage.
+ *
+ *   PATCH  /social-media/posts/:id                         body: UpdatePostDto
+ *     → Modifie un post (auteur uniquement). Champs absents → valeurs inchangées.
+ *
+ *   DELETE /social-media/posts/:id
+ *     → Supprime un post (auteur ou ADMIN, selon req.user.role).
+ *
+ *   POST   /social-media/posts/:id/share                    body: SharePostDto
+ *     → Partage un post. Crée un nouveau post avec token [[shared:<b64>]] + message optionnel.
+ *
+ *   POST   /social-media/posts/:id/comments                 body: CreateCommentDto
+ *     → Ajoute un commentaire. Supporte [[reply:commentId]] pour réponses imbriquées.
+ *       Déclenche notifications auteur du post + auteur du commentaire parent + mentions.
+ *
+ *   GET    /social-media/posts/:id/comments
+ *     → Liste les commentaires d'un post (triés par date asc).
+ *
+ *   PATCH  /social-media/posts/:postId/comments/:commentId  body: CreateCommentDto
+ *     → Modifie un commentaire (auteur uniquement).
+ *
+ *   DELETE /social-media/posts/:postId/comments/:commentId
+ *     → Supprime un commentaire (auteur ou ADMIN selon req.user.role).
+ *
+ *   POST   /social-media/posts/:id/reactions                body: CreateReactionDto
+ *     → Ajoute/remplace une réaction (upsert). Notifie l'auteur si nouvelle réaction.
+ *       Types : like, love, wow, bravo, instructif, soutien, haha.
+ *
+ *   DELETE /social-media/posts/:id/reactions
+ *     → Retire la réaction de l'utilisateur courant.
+ *
+ *   GET    /social-media/posts/:id/reactions
+ *     → { aggregated: { [type]: User[] }, total, userReaction }.
+ *
+ *   POST   /social-media/posts/:id/favorites
+ *     → Ajoute un post aux favoris (upsert idempotent).
+ *
+ *   DELETE /social-media/posts/:id/favorites
+ *     → Retire un post des favoris.
+ *
+ *   GET    /social-media/favorites/posts                     ?limit=20&offset=0
+ *     → Fil de favoris paginé, filtré selon visibilité + utilisateurs masqués.
+ *
+ *   GET    /social-media/favorites/count
+ *     → Nombre total de posts mis en favoris par l'utilisateur courant.
+ *
+ *   POST   /social-media/users/:id/hide
+ *     → Masque un utilisateur (ses posts disparaissent du fil). Soi-même interdit.
+ *
+ *   DELETE /social-media/users/:id/hide
+ *     → Démasque un utilisateur.
+ *
+ *   GET    /social-media/users/hidden
+ *     → Liste tous les utilisateurs masqués par l'utilisateur courant.
+ */
+
 import {
   Body,
   Controller,

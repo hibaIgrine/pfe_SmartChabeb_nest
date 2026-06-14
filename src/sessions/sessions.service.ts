@@ -1,3 +1,83 @@
+/**
+ * ============================================================
+ * FICHIER : sessions.service.ts
+ * RÔLE    : Logique métier de gestion des sessions de recommandation ML.
+ * ============================================================
+ *
+ * Une session ML est créée par le coach/responsable avant de demander
+ * une recommandation. Elle capture l'état complet de la séance (30 variables)
+ * et est persistée dans la table recommendation_sessions.
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * HELPERS PRIVÉS
+ * ─────────────────────────────────────────────────────────────────
+ *
+ * getLatestChosenActivity(sessionId: number) → string | null
+ *   Cherche dans recommendation_history la DERNIÈRE recommandation liée à
+ *   cette session (orderBy created_at DESC) et retourne activite_choisie.
+ *   Retourne null si aucune recommandation n'a encore été faite ou validée.
+ *   Utilisé pour enrichir la vue session avec le choix final du coach.
+ *
+ * resolveDomaine(categorie: string | null) → string
+ *   Convertit la catégorie libre du club (ex: 'Football', 'Peinture', 'Robotique')
+ *   en domaine normalisé compatible avec le dataset ML :
+ *     - /sport|foot|basket|hand|volley|ping|natation|gym/  → 'Sport'
+ *     - /art|peinture|dessin|sculpt|photo|vid|cin|musique|chant|danse|th[eé]/  → 'Arts'
+ *     - /num[eé]rique|info|robot|bureau|web|code|tech/  → 'Numérique'
+ *     - /langue|litt[eé]r|lecture|po[eé]sie/  → 'Culture'
+ *     - /citoyen|enviro|leadership|entrep/  → 'Citoyenneté'
+ *     - /[eé]checs|strat/  → 'Intellectuel'
+ *     - Sinon → retourne la catégorie telle quelle (fallback)
+ *   CRITIQUE : le domaine est l'une des 30 features ML. Une mauvaise
+ *   résolution entraîne un [Miss] dans Flask et dégrade la prédiction.
+ *
+ * toSessionView(row, activiteChoisie?) → Session
+ *   Mapper de la ligne Prisma (recommendation_sessions + club) vers
+ *   l'interface Session exposée par l'API.
+ *   Construit le sous-objet club { id, nom, nom_dataset, domaine }
+ *   en appelant resolveDomaine(row.club.categorie).
+ *   activiteChoisie : injecté depuis getLatestChosenActivity() — null par défaut.
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * MÉTHODES PUBLIQUES
+ * ─────────────────────────────────────────────────────────────────
+ *
+ * create(createSessionDto, responsableId?)
+ *   1. Vérifie que le club existe (BadRequestException sinon).
+ *   2. Insère dans recommendation_sessions avec id_responsable = JWT userId.
+ *   3. Valeurs par défaut :
+ *      - activite_j_minus_2  : null (optionnel)
+ *      - activite_precedente : null (optionnel)
+ *      - activite_exterieure : 'Non'
+ *      - repetition_activite : 0
+ *      - sequence_logique    : 1
+ *   4. Retourne toSessionView(created) sans activite_choisie (null).
+ *
+ * findAll() → Session[]
+ *   Récupère toutes les sessions (orderBy created_at DESC).
+ *   Pour chacune, charge getLatestChosenActivity() en parallèle (Promise.all).
+ *   Retourne la liste enrichie avec activite_choisie.
+ *
+ * findOne(id) → Session
+ *   NotFoundException si la session n'existe pas.
+ *   Charge getLatestChosenActivity() et retourne la vue complète.
+ *
+ * update(id, updateSessionDto) → Session
+ *   NotFoundException si inexistante.
+ *   Met à jour avec spread { ...updateSessionDto } (PartialType — tous champs optionnels).
+ *   Retourne la vue mise à jour avec activite_choisie courante.
+ *
+ * remove(id) → { deleted: boolean }
+ *   NotFoundException si inexistante.
+ *   Delete physique de la session (et cascade sur recommendation_history si FK définie).
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * TABLE PRISMA : recommendation_sessions
+ * ─────────────────────────────────────────────────────────────────
+ *   id (auto-increment), id_club (FK), id_responsable (FK nullable),
+ *   + les 28 autres colonnes correspondant aux features ML (voir Session entity).
+ */
+
 import {
   BadRequestException,
   Injectable,

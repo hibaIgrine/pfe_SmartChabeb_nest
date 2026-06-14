@@ -1,3 +1,36 @@
+/**
+ * ============================================================
+ * FICHIER : roles.service.ts
+ * RÔLE    : Logique métier CRUD pour la table `roles` en base de données.
+ * ============================================================
+ *
+ * MÉTHODES :
+ *
+ *   create(dto)
+ *     INSERT dans `roles` avec nom.toUpperCase().trim().
+ *     Capture l'erreur Prisma P2002 (unique constraint sur nom) → ConflictException.
+ *
+ *   findAll()
+ *     SELECT avec include utilisateurs { include centre }.
+ *     Permet de voir combien d'utilisateurs portent chaque rôle et dans quel centre.
+ *     Trié par nom ASC.
+ *
+ *   findOne(id)
+ *     SELECT par UUID. Retourne null si introuvable (pas de NotFoundException ici).
+ *
+ *   update(id, dto)
+ *     UPDATE nom et/ou description. nom.toUpperCase().trim() si fourni.
+ *
+ *   remove(id)
+ *     Vérifie d'abord count(utilisateurs WHERE id_role = id).
+ *     Si count > 0 → ConflictException (message avec le nombre exact).
+ *     Si count = 0 → DELETE.
+ *     Cette protection évite de casser la relation FK utilisateurs.id_role → roles.id.
+ *
+ * TABLE PRISMA : roles
+ *   Relation : utilisateurs.id_role → roles.id (FK, 1 rôle → N utilisateurs)
+ */
+
 import { ConflictException, Injectable } from '@nestjs/common';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
@@ -7,9 +40,10 @@ import { PrismaService } from 'src/prisma/prisma.service';
 export class RolesService {
   constructor(private prisma: PrismaService) {}
 
-  // ==========================================
-  // Créer un nouveau grade (RBAC Dynamique)
-  // ==========================================
+  /**
+   * Crée un rôle (nom converti en MAJUSCULES + trim).
+   * ConflictException si le nom existe déjà (Prisma P2002 = unique constraint violated).
+   */
   async create(createRoleDto: CreateRoleDto) {
     try {
       return await this.prisma.roles.create({
@@ -31,10 +65,10 @@ export class RolesService {
     }
   }
 
-  // ==========================================
-  // Lister les rôles avec les utilisateurs et leurs centres
-  // ==========================================
-  // src/roles/roles.service.ts
+  /**
+   * Tous les rôles avec leurs utilisateurs et le centre de chaque utilisateur.
+   * Triés par nom ASC. Utile pour un tableau de bord des rôles attribués.
+   */
   async findAll() {
     return await this.prisma.roles.findMany({
       include: {
@@ -48,11 +82,13 @@ export class RolesService {
     });
   }
 
-  // ==========================================
-  // Supprimer un grade (Sécurisé)
-  // ==========================================
+  /**
+   * Supprime un rôle UNIQUEMENT si aucun utilisateur ne le possède.
+   * Vérifie count(utilisateurs WHERE id_role=id) avant de supprimer.
+   * ConflictException avec le nombre exact si des utilisateurs bloquent la suppression.
+   */
   async remove(id: string) {
-    // 🛡️ Sécurité : On vérifie si des utilisateurs portent encore ce grade
+    // Protection FK : on ne peut pas supprimer un rôle encore utilisé
     const count = await this.prisma.utilisateurs.count({
       where: { id_role: id },
     });
@@ -68,11 +104,12 @@ export class RolesService {
     });
   }
 
-  // Fonctions de base (à implémenter si besoin pour ton CRUD)
+  /** Retourne un rôle par UUID. Retourne null si introuvable (pas de NotFoundException). */
   findOne(id: string) {
     return this.prisma.roles.findUnique({ where: { id } });
   }
 
+  /** Met à jour nom et/ou description. nom.toUpperCase().trim() appliqué si fourni. */
   async update(id: string, updateRoleDto: UpdateRoleDto) {
     return await this.prisma.roles.update({
       where: { id },

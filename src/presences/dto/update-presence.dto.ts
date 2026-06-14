@@ -2,7 +2,8 @@ import { PartialType } from '@nestjs/swagger';
 import { CreatePresenceDto } from './create-presence.dto';
 
 /**
- * Variante partielle du DTO de creation.
- * Ici elle sert surtout de structure standard pour une future mise a jour.
+ * DTO de mise à jour de présence — généré par NestJS CLI.
+ * Étend CreatePresenceDto avec tous les champs optionnels via PartialType.
+ * Actuellement vide car la logique de mise à jour utilise MarkPresenceDto (upsert).
  */
 export class UpdatePresenceDto extends PartialType(CreatePresenceDto) {}

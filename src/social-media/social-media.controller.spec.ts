@@ -1,3 +1,8 @@
+/**
+ * Test unitaire minimal pour SocialMediaController.
+ * ATTENTION : SocialMediaService est injecté sans mock → instanciation échoue en pratique.
+ * À compléter avec { provide: SocialMediaService, useValue: mock } avant d'ajouter des tests.
+ */
 import { Test, TestingModule } from '@nestjs/testing';
 import { SocialMediaController } from './social-media.controller';
 import { SocialMediaService } from './social-media.service';

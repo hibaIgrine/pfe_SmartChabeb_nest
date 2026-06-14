@@ -1,3 +1,90 @@
+/**
+ * ============================================================
+ * FICHIER : presences.service.ts
+ * RÔLE    : Logique métier des présences, séances et feedbacks de clubs.
+ * ============================================================
+ *
+ * MÉTHODES PRIVÉES UTILITAIRES :
+ *
+ *   escapeCsv(value)
+ *     Échappe une valeur pour export CSV : si la valeur contient " , \n \r → encadre de guillemets
+ *     et double les guillemets internes. Retourne '' pour null/undefined.
+ *
+ *   normalizeDate(input?)
+ *     Valide le format YYYY-MM-DD ; si absent → date du jour (UTC).
+ *     Parse en UTC midnight : new Date(`${raw}T00:00:00.000Z`).
+ *     Lève BadRequestException si format invalide.
+ *
+ *   formatDate(date)
+ *     Convertit un objet Date en "YYYY-MM-DD" via toISOString().split('T')[0].
+ *
+ *   assertCanManageClub(userId, clubId)
+ *     RESP_CLUB : id_coach = userId OU club_staff.is_active (staff actif du club)
+ *     RESP_CENTRE : club.id_centre = user.id_centre
+ *     Lève ForbiddenException si l'utilisateur n'a pas le droit.
+ *
+ * MÉTHODES PUBLIQUES :
+ *
+ *   getManageableClubs(userId)
+ *     RESP_CLUB  → WHERE id_coach = userId
+ *     RESP_CENTRE → WHERE id_centre = user.id_centre
+ *     Retourne clubs avec nom, categorie, locale_fixe, centre.nom, count(inscriptions ACCEPTE).
+ *
+ *   markPresence(responsableId, dto)
+ *     Vérifie inscription ACCEPTE de id_utilisateur dans id_club.
+ *     Trouve ou crée la séance pour (id_club, date_presence) via createSeance().
+ *     Upsert presences_clubs sur (id_club, id_utilisateur, id_seance).
+ *
+ *   unmarkPresence(responsableId, dto)
+ *     Vérifie droit via assertCanManageClub.
+ *     deleteMany presences_clubs selon (id_club, id_utilisateur, id_seance?, date_seance?).
+ *
+ *   getMembersForDate(userId, clubId, date?, seanceId?)
+ *     Charge inscriptions ACCEPTE + presences via Map<id_utilisateur, {statut, remarque}>.
+ *     Retourne membres avec statut (PRESENT|ABSENT|NON_MARQUE).
+ *
+ *   getHistory(userId, clubId, memberId?, startDate?, endDate?, limit=100, seanceId?)
+ *     Historique des présences filtrable. limit clampé entre 1 et 200.
+ *
+ *   createSeance(userId, dto)
+ *     findFirst pour (id_club, date_seance) → si existe, retourne sans créer.
+ *     Sinon : prisma.seances.create().
+ *     Idempotent — peut être appelé plusieurs fois sans effets secondaires.
+ *
+ *   getSeancesForClub(userId, clubId, date?)
+ *     Filtre séances par id_club, optionnellement par date.
+ *
+ *   getMyFeedbackSeances(userId)
+ *     ADHERENT uniquement. Présences PRESENT où seance.date_seance ≤ maintenant.
+ *     Charge feedbacks existants via Map<seanceId, feedback> → O(1) par séance.
+ *     Retourne : { seance, presence, feedback: {...} | null }.
+ *     Table seance_feedbacks accédée via `this.prisma as any` (modèle non typé).
+ *
+ *   submitSeanceFeedback(userId, seanceId, dto)
+ *     Promise.all → [user, seance, attendance] en parallèle.
+ *     Vérifie : user existe, séance existe + passée, présence PRESENT.
+ *     Upsert sur (id_seance, id_utilisateur) dans seance_feedbacks.
+ *     note_coach : 1-5, note_activites : 1-5, commentaire : max 500c.
+ *
+ *   getClubFeedbacks(userId, clubId, limit, seanceId?)
+ *     Charge séances du club (filtrées par seanceId si fourni).
+ *     Charge feedbacks via Map<seanceId, feedback[]>.
+ *     Calcule average_coach et average_activities par séance.
+ *     Retourne : [{ seance, feedback_count, average_coach, average_activities, feedbacks[] }]
+ *
+ *   getStats(userId, clubId, startDate?, endDate?)
+ *     Promise.all → [membresActifs, presences] en parallèle.
+ *     Maps en mémoire : par_jour (date → {presents, absents}), par_membre (userId → {nom, prénom, taux...})
+ *     taux_presence global = presents / (presents + absents) * 100
+ *
+ *   exportDailyPresence(userId, clubId, date?, seanceId?)
+ *     Export CSV 26 colonnes : club, centre, responsable, membre, statut, remarque, timestamp.
+ *     escapeCsv() appliqué sur chaque cellule.
+ *     Retourne : { fileName (YYYYMMDD_clubId.csv), csv (string), metadata {...}, records [] }
+ *
+ * TABLES PRISMA : presences_clubs, seances, seance_feedbacks (via `as any`)
+ */
+
 import {
   BadRequestException,
   ForbiddenException,
@@ -11,7 +98,7 @@ import { MarkPresenceDto } from './dto/mark-presence.dto';
 export class PresencesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // Echappe une valeur avant export CSV pour eviter de casser les colonnes.
+  /** Échappe une valeur pour export CSV — guillemets doublés si la valeur contient " , \n \r. */
   private escapeCsv(value: unknown): string {
     const raw = value === null || value === undefined ? '' : String(value);
     if (/[",\n\r]/.test(raw)) {
@@ -20,7 +107,7 @@ export class PresencesService {
     return raw;
   }
 
-  // Normalise une date texte au format UTC YYYY-MM-DD.
+  /** Valide YYYY-MM-DD et parse en UTC midnight. Si absent → date du jour. Lève BadRequestException si invalide. */
   private normalizeDate(input?: string): Date {
     const raw =
       input && input.trim() ? input.trim() : this.formatDate(new Date());
@@ -35,12 +122,15 @@ export class PresencesService {
     return new Date(`${raw}T00:00:00.000Z`);
   }
 
-  // Convertit une date JS en chaine YYYY-MM-DD.
+  /** Convertit un objet Date en "YYYY-MM-DD" via toISOString().split('T')[0]. */
   private formatDate(date: Date): string {
     return date.toISOString().split('T')[0];
   }
 
-  // Verifie que l'utilisateur a le droit de gerer les presences de ce club.
+  /**
+   * Vérifie que l'utilisateur peut gérer les présences du club.
+   * RESP_CLUB : id_coach = userId OU staff actif. RESP_CENTRE : club.id_centre = user.id_centre.
+   */
   private async assertCanManageClub(
     userId: string,
     clubId: string,
@@ -103,7 +193,10 @@ export class PresencesService {
     }
   }
 
-  // Retourne les clubs que cet utilisateur a le droit de gerer.
+  /**
+   * Clubs gérables : RESP_CLUB → WHERE id_coach=userId, RESP_CENTRE → WHERE id_centre=user.id_centre.
+   * Inclut count(inscriptions ACCEPTE) pour chaque club.
+   */
   async getManageableClubs(userId: string) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { id: userId },
@@ -154,7 +247,11 @@ export class PresencesService {
     });
   }
 
-  // Marque la presence d'un membre pour une date donnee.
+  /**
+   * Marque ou met à jour la présence d'un membre.
+   * Vérifie inscription ACCEPTE → trouve/crée séance → upsert presences_clubs.
+   * Clé upsert : (id_club, id_utilisateur, id_seance).
+   */
   async markPresence(responsableId: string, dto: MarkPresenceDto) {
     const statut = (dto.statut || '').toUpperCase();
     if (!['PRESENT', 'ABSENT'].includes(statut)) {
@@ -245,7 +342,10 @@ export class PresencesService {
     });
   }
 
-  // Supprime un marquage pour revenir à l'état non marqué.
+  /**
+   * Supprime le marquage de présence → membre revient à NON_MARQUE.
+   * deleteMany sur (id_club, id_utilisateur, id_seance). Résout id_seance via date si absent.
+   */
   async unmarkPresence(responsableId: string, dto: any) {
     await this.assertCanManageClub(responsableId, dto.id_club);
 
@@ -278,7 +378,10 @@ export class PresencesService {
     return { success: true };
   }
 
-  // Construit la liste des membres d'un club avec leur statut pour une date.
+  /**
+   * Membres actifs + leur statut pour une date/séance.
+   * Utilise Map<id_utilisateur, {statut, remarque}> pour éviter N+1. NON_MARQUE si absent de la Map.
+   */
   async getMembersForDate(
     userId: string,
     clubId: string,
@@ -364,7 +467,10 @@ export class PresencesService {
     };
   }
 
-  // Recupere l'historique complet des presences avec filtre par dates et membre.
+  /**
+   * Historique des présences filtrable par memberId, plage de dates, séance.
+   * limit clampé entre 1 et 200. Trié par date_presence DESC.
+   */
   async getHistory(
     userId: string,
     clubId: string,
@@ -417,7 +523,10 @@ export class PresencesService {
     });
   }
 
-  // Crée ou renvoie une séance pour un club
+  /**
+   * Crée une séance (idempotent) : findFirst par (id_club, date_seance, titre) → retourne si existante.
+   * Si absent → INSERT dans seances. Titre par défaut : "Séance YYYY-MM-DD".
+   */
   async createSeance(userId: string, dto: any) {
     await this.assertCanManageClub(userId, dto.id_club);
 
@@ -450,7 +559,7 @@ export class PresencesService {
     return created;
   }
 
-  // Liste les séances d'un club (optionnellement filtrées par date)
+  /** Séances d'un club, filtrables par date. Triées par heure_debut ASC. */
   async getSeancesForClub(userId: string, clubId: string, date?: string) {
     await this.assertCanManageClub(userId, clubId);
 
@@ -463,7 +572,10 @@ export class PresencesService {
     });
   }
 
-  // Liste les seances que l'adhérent a réellement suivies et peut commenter.
+  /**
+   * Séances passées où l'adhérent était PRESENT + feedbacks existants via Map<seanceId, feedback>.
+   * Table seance_feedbacks accédée via `this.prisma as any` (modèle non typé dans Prisma Client).
+   */
   async getMyFeedbackSeances(userId: string) {
     const prisma = this.prisma as any;
 
@@ -570,7 +682,11 @@ export class PresencesService {
       .filter(Boolean);
   }
 
-  // Permet à un adhérent de noter une séance qu'il a effectivement suivie.
+  /**
+   * Soumet ou met à jour le feedback d'un adhérent pour une séance.
+   * Promise.all → [user, seance, attendance]. Upsert sur (id_seance, id_utilisateur).
+   * Conditions : ADHERENT, PRESENT à la séance, date_seance ≤ maintenant, notes 1-5.
+   */
   async submitSeanceFeedback(userId: string, seanceId: string, dto: any) {
     const prisma = this.prisma as any;
 
@@ -693,9 +809,11 @@ export class PresencesService {
     };
   }
 
-  // Permet à un responsable de club/centre de consulter les feedbacks laissés
-  // sur les séances de son(s) club(s). Retourne la liste des feedbacks et un
-  // résumé (moyennes) par séance.
+  /**
+   * Feedbacks des adhérents pour les séances du club.
+   * Calcule average_coach et average_activities via Map<seanceId, {count, sumCoach, sumActivities}>.
+   * Retourne : { feedbacks[], summary[{ seanceId, average_coach, average_activities, count }] }
+   */
   async getClubFeedbacks(
     userId: string,
     clubId: string,
@@ -774,7 +892,10 @@ export class PresencesService {
     return { feedbacks, summary };
   }
 
-  // Calcule les statistiques de presence globales et par membre.
+  /**
+   * Statistiques de présence : taux global + Maps par_jour et par_membre.
+   * Promise.all → [membresActifs, presences]. taux_presence = presents/(presents+absents)*100.
+   */
   async getStats(
     userId: string,
     clubId: string,
@@ -903,7 +1024,11 @@ export class PresencesService {
     };
   }
 
-  // Prepare les donnees du jour pour un export de presence.
+  /**
+   * Export CSV 26 colonnes des présences d'une journée/séance.
+   * escapeCsv() appliqué sur chaque cellule. Retourne { fileName, csv, metadata, records }.
+   * fileName = "YYYYMMDD_clubId.csv".
+   */
   async exportDailyPresence(
     userId: string,
     clubId: string,

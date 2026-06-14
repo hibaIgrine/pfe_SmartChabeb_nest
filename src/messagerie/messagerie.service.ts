@@ -1,3 +1,85 @@
+/**
+ * ============================================================
+ * FICHIER : messagerie.service.ts
+ * RÔLE    : Logique métier complète de la messagerie (HTTP).
+ * ============================================================
+ *
+ * CONSTANTES :
+ *   onlineWindowMs  = 2 min  — fenêtre de considération "en ligne" pour mapPresenceUser()
+ *   typingWindowMs  = 8 s    — fenêtre pour getTypingStatus()
+ *   participantPreviewSelect — projection commune des champs utilisateur (id, nom, prenom, photo, is_online, last_seen_at)
+ *
+ * PRÉSENCE UTILISATEUR :
+ *   updateMyPresenceHeartbeat(userId)   → is_online=true, last_seen_at=now
+ *   updateMyPresenceOffline(userId)     → is_online=false, last_seen_at=now
+ *   mapPresenceUser(user)               → recalcule is_online selon last_seen_at (fenêtre 2 min)
+ *
+ * COMPTAGE NON-LU :
+ *   getUnreadMessagesCount(userId)
+ *     → count(messages) WHERE status IN ['SENT','DELIVERED'], sender != moi, pas supprimé pour moi,
+ *       EXCLUSION des conversations où je suis muté et la sourdine est active.
+ *
+ * CONVERSATIONS PRIVÉES :
+ *   createPrivateConversation(userId, dto)
+ *     → assertUserCanChat (compte actif) → buildPrivateConversationKey → upsert (idempotent).
+ *     → Rôle ADMIN pour le créateur, MEMBER pour le destinataire.
+ *
+ * CONVERSATIONS DE GROUPE :
+ *   createGroupConversation(userId, dto)
+ *     → normalizeConversationTitle + assertValidGroupTitle → normalizeUserIds (dédupliqués).
+ *     → assertUserCanChat pour chaque participant → create avec rôle ADMIN pour le créateur.
+ *   renameGroupConversation(conversationId, userId, dto) → assertGroupAdmin → update title.
+ *   addGroupMembers(conversationId, userId, dto)         → assertGroupAdmin → createMany skipDuplicates.
+ *   removeGroupMember(conversationId, userId, memberUserId)
+ *     → assertGroupAdmin → créateur ne peut pas être supprimé → delete participant.
+ *
+ * LISTE DES CONVERSATIONS :
+ *   getMyConversations(userId)
+ *     1. cleanupExpiredMutes() — nettoyage lazY des sourdines "1H" expirées
+ *     2. updateMany SENT → DELIVERED pour messages non lus visibles
+ *     3. findMany conversation_participants avec derniers messages (take:1)
+ *     → formatConversationSummary() : inclut counterpart, last_message, statut de mute.
+ *
+ * MESSAGES :
+ *   getMessages(conversationId, userId)
+ *     → assertMembership → $transaction (SENT→DELIVERED + findMany chronologiques).
+ *   sendMessage(conversationId, senderId, dto)
+ *     → assertMembership → normalizeMessageContent + normalizeMediaUrls + assertPrivateMessagePayload
+ *     → $transaction: create message, update last_message_at, reset last_typing_at.
+ *   updateMessage(conversationId, messageId, userId, dto)
+ *     → assertMembership → findFirst (sender vérification) → ForbiddenException si pas l'auteur
+ *     → recalcule type/content/media → assertPrivateMessagePayload → update + edited_at.
+ *   deleteMessage(conversationId, messageId, userId, dto)
+ *     → scope EVERYONE : auteur uniquement → marque deleted_for_everyone_at, efface content/media.
+ *     → scope ME       : upsert message_deleted_for_users (soft delete personnel).
+ *   markConversationAsRead(conversationId, userId)
+ *     → $transaction: updateMany DELIVERED→READ + update last_read_at participant.
+ *
+ * ÉPINGLAGE :
+ *   updateMessagePin(conversationId, messageId, userId, dto)
+ *     → assertMembership → tout membre peut épingler/désépingler → update pinned_at/pinned_by.
+ *
+ * TYPING (HTTP fallback) :
+ *   getTypingStatus(conversationId, userId)   → participants avec last_typing_at >= now - 8s.
+ *   updateTypingStatus(conversationId, userId, dto) → update last_typing_at ou null.
+ *
+ * ARCHIVAGE / MUTE / SUPPRESSION :
+ *   updateConversationArchive → met à jour archived_at du participant.
+ *   updateConversationMute    → délègue à MessagerieMuteService.updateConversationMute().
+ *   deleteConversation        → private: DELETE pour tous ; group créateur/admin: DELETE ; group membre: quitte.
+ *
+ * GUARDS INTERNES :
+ *   assertMembership(conversationId, userId)  → ForbiddenException si non-participant.
+ *   assertGroupAdmin(conversationId, userId)  → ForbiddenException si pas ADMIN ni créateur.
+ *   assertUserCanChat(userId)                 → NotFoundException / BadRequestException si compte_actif=false.
+ *
+ * FORMATTERS :
+ *   formatConversationSummary() → last_message[0], counterpart, mute active via isMuteActive().
+ *   formatConversationDetail()  → participants complets + tous messages.
+ *   getConversationDetailInclude(userId?) → objet include Prisma réutilisable (participants + messages filtrés).
+ *   parseMediaFromMessage(media) → convertit Prisma.JsonValue en string[] | undefined.
+ */
+
 import {
   BadRequestException,
   ForbiddenException,
@@ -121,6 +203,7 @@ export class MessagerieService {
           },
         },
         conversation: {
+          type: { not: 'chatbot' },
           participants: {
             some: {
               user_id: userId,

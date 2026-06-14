@@ -1,3 +1,37 @@
+/**
+ * ============================================================
+ * FICHIER : messagerie-mute.service.ts
+ * RÔLE    : Gestion de la mise en sourdine des conversations.
+ * ============================================================
+ *
+ * CONCEPT :
+ *   Un participant peut mettre en sourdine une conversation pour ne plus
+ *   recevoir de notifications de nouveaux messages. Deux modes sont supportés :
+ *     - "1H"               : sourdine temporaire (muted_until = now + 1h)
+ *     - "UNTIL_REACTIVATED": sourdine permanente (muted_until = null)
+ *   Désactiver (is_muted=false) remet muted_at et muted_until à null.
+ *
+ * CHAMPS BDD (conversation_participants) :
+ *   muted_at    — date d'activation de la sourdine (null = non muté)
+ *   muted_until — date d'expiration (null = sourdine permanente)
+ *
+ * MÉTHODES :
+ *
+ *   updateConversationMute(conversationId, userId, dto)
+ *     Vérifie la participation (ForbiddenException sinon).
+ *     Calcule muted_at / muted_until selon dto.is_muted et dto.mode.
+ *     Met à jour conversation_participants. Retourne l'état de mute.
+ *
+ *   cleanupExpiredMutes(userId)
+ *     Appelée lors de getMyConversations() pour nettoyer les sourdines "1H" expirées.
+ *     updateMany({ muted_until: { not: null, lte: now } }) → remet muted_at/muted_until à null.
+ *
+ *   isMuteActive(participant?) → boolean
+ *     Fonction utilitaire synchrone (pas de BDD).
+ *     Retourne true si muted_at != null ET (muted_until == null OU muted_until > now).
+ *     Utilisée dans les formatters de formatConversationSummary / formatConversationDetail.
+ */
+
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { UpdateConversationMuteDto } from './dto/update-conversation-mute.dto';

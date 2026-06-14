@@ -1,3 +1,9 @@
+/**
+ * DTO legacy pour créer une conversation depuis le module social-media.
+ * Non utilisé dans l'implémentation actuelle — la gestion des conversations
+ * a été déplacée dans le module dédié `messagerie` (MessagerieController).
+ * Conservé pour rétrocompatibilité ou usage futur.
+ */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayNotEmpty,

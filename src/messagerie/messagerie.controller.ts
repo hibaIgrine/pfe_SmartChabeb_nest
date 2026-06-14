@@ -1,3 +1,86 @@
+/**
+ * ============================================================
+ * FICHIER : messagerie.controller.ts
+ * RÔLE    : Routes HTTP REST pour la messagerie.
+ * ============================================================
+ *
+ * BASE URL : /messagerie
+ * Tout le controller est protégé par @UseGuards(AuthGuard('jwt')) → JWT obligatoire.
+ *
+ * ROUTES EXPOSÉES :
+ *
+ *   GET    /messagerie/users
+ *     → Liste tous les utilisateurs disponibles pour initier une conversation
+ *       (délègue à UsersService.findAllForMessaging, exclut l'appelant).
+ *
+ *   GET    /messagerie/unread-count
+ *     → Nombre total de messages non lus (status SENT ou DELIVERED), hors sourdines actives.
+ *
+ *   PATCH  /messagerie/presence/heartbeat
+ *     → Met is_online=true et last_seen_at=now pour l'utilisateur courant.
+ *       À appeler périodiquement (ex: toutes les 60s) pour maintenir la présence.
+ *
+ *   PATCH  /messagerie/presence/offline
+ *     → Met is_online=false et last_seen_at=now (déconnexion explicite).
+ *
+ *   POST   /messagerie/conversations/private   body: CreateConversationDto
+ *     → Crée (ou retourne si existante) une conversation privée via upsert sur private_key.
+ *
+ *   POST   /messagerie/conversations/group     body: CreateGroupConversationDto
+ *     → Crée un groupe. Le créateur devient ADMIN, les autres MEMBER.
+ *
+ *   GET    /messagerie/conversations/me
+ *     → Liste toutes les conversations de l'utilisateur (triées par last_message_at DESC).
+ *       Déclenche cleanupExpiredMutes() et marque les messages SENT → DELIVERED.
+ *
+ *   GET    /messagerie/conversations/:id
+ *     → Détail d'une conversation avec participants complets et tous messages.
+ *
+ *   DELETE /messagerie/conversations/:id
+ *     → Supprime pour tout le monde (privée ou admin groupe) ou quitte le groupe (membre).
+ *
+ *   GET    /messagerie/conversations/:id/messages
+ *     → Tous les messages de la conversation (hors supprimés pour moi), en $transaction
+ *       avec mise à jour SENT→DELIVERED.
+ *
+ *   GET    /messagerie/conversations/:id/typing
+ *     → Participants en train d'écrire (last_typing_at dans les 8 dernières secondes).
+ *
+ *   PATCH  /messagerie/conversations/:id/typing    body: UpdateTypingDto
+ *     → Met à jour l'état de frappe de l'utilisateur (HTTP fallback du WebSocket).
+ *
+ *   PATCH  /messagerie/conversations/:id/archive   body: UpdateConversationArchiveDto
+ *     → Archive/désarchive la conversation pour l'utilisateur courant uniquement.
+ *
+ *   PATCH  /messagerie/conversations/:id/mute      body: UpdateConversationMuteDto
+ *     → Active/désactive la sourdine (mode '1H' ou 'UNTIL_REACTIVATED').
+ *
+ *   PATCH  /messagerie/conversations/:id/title     body: UpdateConversationTitleDto
+ *     → Renomme le groupe (réservé aux ADMIN ou créateur).
+ *
+ *   PATCH  /messagerie/conversations/:id/read
+ *     → Marque tous les messages DELIVERED → READ et met à jour last_read_at.
+ *
+ *   POST   /messagerie/conversations/:id/members   body: UpdateConversationMembersDto
+ *     → Ajoute des membres au groupe (réservé aux ADMIN).
+ *
+ *   DELETE /messagerie/conversations/:id/members/:memberUserId
+ *     → Retire un membre du groupe (réservé aux ADMIN ; le créateur ne peut pas être retiré).
+ *
+ *   POST   /messagerie/conversations/:id/messages  body: CreateMessageDto
+ *     → Envoie un message (TEXT|IMAGE|VIDEO|DOCUMENT) dans la conversation.
+ *
+ *   PATCH  /messagerie/conversations/:id/messages/:messageId  body: UpdateMessageDto
+ *     → Modifie le contenu d'un message (auteur uniquement) → met edited_at.
+ *
+ *   PATCH  /messagerie/conversations/:id/messages/:messageId/pin  body: UpdateMessagePinDto
+ *     → Épingle ou désépingle un message (tout participant).
+ *
+ *   DELETE /messagerie/conversations/:id/messages/:messageId  body: DeleteMessageDto
+ *     → scope=EVERYONE : suppression pour tous (auteur uniquement) — efface content/media.
+ *     → scope=ME       : suppression personnelle via message_deleted_for_users.
+ */
+
 import {
   Body,
   Controller,

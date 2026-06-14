@@ -17,29 +17,86 @@ import { UnmarkPresenceDto } from './dto/unmark-presence.dto';
 import { CreateSeanceFeedbackDto } from './dto/create-seance-feedback.dto';
 
 /**
- * Couche HTTP du module presences.
- * Elle recoit les params de requete, applique l'authentification/role, puis delegue au service.
+ * ============================================================
+ * FICHIER : presences.controller.ts
+ * RÔLE    : Routes HTTP pour la gestion des présences aux séances de clubs.
+ * ============================================================
+ *
+ * BASE URL : /presences
+ * Tout le controller est protégé par @UseGuards(AuthGuard('jwt')) → JWT obligatoire.
+ * Chaque route utilise @Roles() pour restreindre l'accès selon le rôle.
+ *
+ * ROUTES EXPOSÉES :
+ *
+ *   GET /presences/my-clubs                     [RESP_CLUB, RESP_CENTRE]
+ *     → Liste les clubs que l'utilisateur peut gérer (son club ou tous les clubs de son centre).
+ *
+ *   POST /presences/seances                     [RESP_CLUB, RESP_CENTRE]
+ *     → Crée une séance pour un club (idempotent — retourne l'existante si déjà créée).
+ *     → Body : CreateSeanceDto { id_club, date_seance?, titre?, heure_debut?, heure_fin? }
+ *
+ *   GET /presences/clubs/:clubId/seances        [RESP_CLUB, RESP_CENTRE]
+ *     → Liste les séances d'un club, avec filtre optionnel par date (query: date=YYYY-MM-DD).
+ *
+ *   POST /presences/mark                        [RESP_CLUB, RESP_CENTRE]
+ *     → Marque ou met à jour la présence d'un membre (PRESENT | ABSENT).
+ *     → Crée automatiquement la séance si absente pour la date donnée.
+ *     → Upsert sur (id_club, id_utilisateur, id_seance).
+ *
+ *   GET /presences/:clubId/members              [RESP_CLUB, RESP_CENTRE]
+ *     → Liste les membres actifs du club avec leur statut pour une date/séance donnée.
+ *     → Query : date (YYYY-MM-DD), seanceId (UUID) — optionnels.
+ *
+ *   GET /presences/:clubId/history              [RESP_CLUB, RESP_CENTRE]
+ *     → Historique des présences d'un club, filtrables par memberId, dates, séance.
+ *     → Query : memberId, startDate, endDate, limit (défaut 100, max 200), seanceId.
+ *
+ *   GET /presences/:clubId/stats                [RESP_CLUB, RESP_CENTRE]
+ *     → Statistiques : taux_presence global, répartition par jour et par membre.
+ *     → Query : startDate, endDate (optionnels).
+ *
+ *   GET /presences/adherent/seances             [ADHERENT]
+ *     → Séances passées où l'adhérent était PRESENT, avec indication si feedback déjà soumis.
+ *
+ *   POST /presences/adherent/seances/:seanceId/feedback  [ADHERENT]
+ *     → Soumet ou met à jour le feedback d'une séance (note_coach, note_activites, commentaire).
+ *     → Conditions : être PRESENT à la séance + séance passée.
+ *
+ *   GET /presences/clubs/:clubId/feedbacks      [RESP_CLUB, RESP_CENTRE]
+ *     → Feedbacks des adhérents pour les séances d'un club.
+ *     → Inclut moyenne note_coach et note_activites par séance.
+ *     → Query : limit (défaut 100), seanceId.
+ *
+ *   GET /presences/:clubId/export               [RESP_CLUB, RESP_CENTRE]
+ *     → Export CSV des présences d'une journée/séance (26 colonnes).
+ *     → Retourne { fileName, csv, metadata, records }.
+ *     → Query : date (YYYY-MM-DD), seanceId.
+ *
+ *   POST /presences/unmark                      [RESP_CLUB, RESP_CENTRE]
+ *     → Supprime un marquage de présence (deleteMany) → le membre revient à NON_MARQUE.
+ *
+ * NOTE : RolesGuard est implicitement appliqué — @Roles() suffit (pas besoin de @UseGuards(RolesGuard)).
  */
 @Controller('presences')
 @UseGuards(AuthGuard('jwt'))
 export class PresencesController {
   constructor(private readonly presencesService: PresencesService) {}
 
-  // Renvoie la liste des clubs que l'utilisateur connecté peut gerer.
+  /** GET /presences/my-clubs — Clubs gérables : pour RESP_CLUB (son club) ou RESP_CENTRE (son centre). */
   @Get('my-clubs')
   @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
   async getMyClubs(@Request() req: any) {
     return await this.presencesService.getManageableClubs(req.user.userId);
   }
 
-  // Crée une séance pour un club (ou la récupère si existe).
+  /** POST /presences/seances — Crée une séance (ou récupère l'existante pour ce club+date). */
   @Post('seances')
   @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
   async createSeance(@Request() req: any, @Body() dto: CreateSeanceDto) {
     return await this.presencesService.createSeance(req.user.userId, dto);
   }
 
-  // Liste des séances pour un club (optionnellement sur une date donnée)
+  /** GET /presences/clubs/:clubId/seances — Séances du club, filtrables par date (query: date=YYYY-MM-DD). */
   @Get('clubs/:clubId/seances')
   @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
   async getSeancesForClub(
@@ -54,14 +111,14 @@ export class PresencesController {
     );
   }
 
-  // Enregistre ou met a jour la presence d'un membre.
+  /** POST /presences/mark — Upsert présence (PRESENT|ABSENT). Crée la séance si absente. */
   @Post('mark')
   @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
   async markPresence(@Request() req: any, @Body() dto: MarkPresenceDto) {
     return await this.presencesService.markPresence(req.user.userId, dto);
   }
 
-  // Renvoie les membres d'un club pour une date donnee avec leur statut du jour.
+  /** GET /presences/:clubId/members — Membres actifs + leur statut (PRESENT|ABSENT|NON_MARQUE) pour la date/séance. */
   @Get(':clubId/members')
   @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
   async getMembers(
@@ -78,7 +135,7 @@ export class PresencesController {
     );
   }
 
-  // Renvoie l'historique des marquages de presence pour un club.
+  /** GET /presences/:clubId/history — Historique filtrable (memberId, dates, séance). limit clampé 1-200. */
   @Get(':clubId/history')
   @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
   async getHistory(
@@ -102,7 +159,7 @@ export class PresencesController {
     );
   }
 
-  // Calcule les statistiques de presence sur une periode.
+  /** GET /presences/:clubId/stats — taux_presence, par_jour et par_membre sur la période. */
   @Get(':clubId/stats')
   @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
   async getStats(
@@ -119,14 +176,14 @@ export class PresencesController {
     );
   }
 
-  // Renvoie les seances que l'adhérent a effectivement suivies.
+  /** GET /presences/adherent/seances — Séances passées où l'adhérent était PRESENT + indicateur feedback déjà soumis. */
   @Get('adherent/seances')
   @Roles('ADHERENT')
   async getMyFeedbackSeances(@Request() req: any) {
     return await this.presencesService.getMyFeedbackSeances(req.user.userId);
   }
 
-  // Enregistre ou met a jour le feedback d'une séance.
+  /** POST /presences/adherent/seances/:seanceId/feedback — Upsert feedback séance (note_coach, note_activites, commentaire). */
   @Post('adherent/seances/:seanceId/feedback')
   @Roles('ADHERENT')
   async submitSeanceFeedback(
@@ -141,7 +198,7 @@ export class PresencesController {
     );
   }
 
-  // Liste les feedbacks pour les séances d'un club (accessible aux responsables)
+  /** GET /presences/clubs/:clubId/feedbacks — Feedbacks des adhérents avec moyennes note_coach et note_activites par séance. */
   @Get('clubs/:clubId/feedbacks')
   @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
   async getClubFeedbacks(
@@ -159,7 +216,7 @@ export class PresencesController {
     );
   }
 
-  // Exporte la presence journaliere d'un club au format exploitable par le front.
+  /** GET /presences/:clubId/export — CSV 26 colonnes. Retourne { fileName, csv, metadata, records }. */
   @Get(':clubId/export')
   @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
   async exportDaily(
@@ -176,7 +233,7 @@ export class PresencesController {
     );
   }
 
-  // Supprime un marquage de presence pour permettre de recommencer.
+  /** POST /presences/unmark — Supprime le marquage (deleteMany) → membre revient à NON_MARQUE. */
   @Post('unmark')
   @Roles('RESPONSABLE_CLUB', 'RESPONSABLE_CENTRE')
   async unmarkPresence(@Request() req: any, @Body() dto: UnmarkPresenceDto) {

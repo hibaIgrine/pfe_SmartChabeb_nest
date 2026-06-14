@@ -1,3 +1,8 @@
+/**
+ * Test unitaire pour ChatbotController.
+ * ChatbotService est mocké — getChatResponse renvoie 'ok' par défaut.
+ * Vérifie que le controller est instanciable sans dépendances réelles.
+ */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ChatbotController } from './chatbot.controller';
 import { ChatbotService } from './chatbot.service';

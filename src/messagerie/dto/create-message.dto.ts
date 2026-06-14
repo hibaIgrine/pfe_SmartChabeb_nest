@@ -1,3 +1,10 @@
+/**
+ * DTO pour envoyer un message dans une conversation.
+ * Règle de validation (assertPrivateMessagePayload) :
+ *   - type TEXT  → content est obligatoire.
+ *   - type IMAGE/VIDEO/DOCUMENT → media doit contenir au moins une URL.
+ * Les URLs media sont dédupliquées et trimées (normalizeMediaUrls).
+ */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,

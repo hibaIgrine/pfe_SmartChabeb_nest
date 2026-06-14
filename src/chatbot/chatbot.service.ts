@@ -1,3 +1,80 @@
+/**
+ * ============================================================
+ * FICHIER : chatbot.service.ts
+ * RÔLE    : Logique métier du chatbot IA — Groq LLM + persistance BDD.
+ * ============================================================
+ *
+ * MODÈLE IA : llama-3.3-70b-versatile (Groq API)
+ *   temperature = 0.2 pour des réponses précises et peu créatives
+ *   temperature = 0   pour le classifier de scope (réponse déterministe)
+ *
+ * CONSTANTES CLÉS :
+ *   maxHistoryMessages      = 8  → limite l'historique passé au LLM (tokens)
+ *   availabilityLookaheadDays = 30 → fenêtre de disponibilité des locaux chargée en BDD
+ *   chatbotUserEmail = 'chatbot@smartchabeb.local' → email du bot virtuel en BDD
+ *
+ * TYPES INTERNES (non exposés en HTTP) :
+ *   ChatbotAgendaItem          → un créneau dans l'agenda d'un local (event ou réservation)
+ *   ChatbotLocalContext        → local enrichi de son agenda des 30 prochains jours
+ *   ChatbotEventPlanningContext → event_request_creation formaté pour le prompt
+ *   ChatbotStoredMessage       → message brut tel que stocké en BDD
+ *   ChatbotStoredConversation  → conversation brute avec messages + participants
+ *   ChatbotConversation        → conversation formatée retournée au front
+ *
+ * MÉTHODES PUBLIQUES :
+ *
+ *   getUserConversations(userId)
+ *     findMany conversations WHERE type='chatbot' AND created_by=userId (20 max, DESC).
+ *     Chaque conversation est formatée via formatConversation().
+ *
+ *   getUserConversation(userId, conversationId)
+ *     findFirst conversation par id + userId. NotFoundException si absente.
+ *
+ *   getChatResponse(userId, history, userMessage, conversationId?)
+ *     PIPELINE COMPLET :
+ *     1. Valide le message (BadRequestException si vide)
+ *     2. Promise.all → 5 requêtes BDD en parallèle :
+ *        - clubs (actifs, max 12)
+ *        - events (actifs, date ≥ aujourd'hui, max 20)
+ *        - locaux (actifs, max 20)
+ *        - réservations (30 prochains jours, max 80)
+ *        - event_request_creations (date ≥ aujourd'hui, max 40)
+ *     3. getOrCreateChatbotUserId → upsert utilisateur bot en BDD
+ *     4. findConversationForUser si conversationId fourni
+ *     5. classifyMessageScope → appel Groq classifier (temperature=0)
+ *        - OUT_OF_SCOPE → retourne outOfScopeReply sans appel LLM principal
+ *     6. buildLocalContexts → enrichit chaque local avec son agenda (events + réservations triés)
+ *     7. buildEventPlanningContexts → formate les event_request_creations
+ *     8. buildSystemPrompt → prompt système avec données JSON injectées
+ *     9. generateGroqReply → appel Groq principal (temperature=0.2)
+ *     10. createConversationWithMessages OU appendToExistingConversation ($transaction)
+ *     11. Retourne { response, conversationId }
+ *
+ * MÉTHODES PRIVÉES :
+ *
+ *   getGroqClient()             → lazy init du client Groq (singleton)
+ *   generateGroqReply(messages) → appel API Groq chat.completions.create
+ *   getOrCreateChatbotUserId()  → upsert utilisateur virtuel chatbot (role='CHATBOT')
+ *   findConversationForUser()   → findFirst conversation par (id, type, created_by)
+ *   formatConversation()        → convertit ChatbotStoredConversation → ChatbotConversation
+ *   formatStoredMessages()      → messages BDD → ChatbotHistoryMessage[] (sender_id=botUserId → role='model')
+ *   buildConversationTitle()    → premier message utilisateur tronqué à 42 chars
+ *   createConversationWithMessages() → $transaction : create conversation + createMany messages + update last_message_at
+ *   appendToExistingConversation()   → $transaction : createMany messages + update last_message_at
+ *   normalizeHistory()          → ChatbotHistoryMessage[] → Groq messages (role 'model' → 'assistant'), filtre vides, prend les 8 derniers
+ *   toGroqMessages()            → alias de normalizeHistory (convertion historique BDD vers Groq)
+ *   buildSystemPrompt()         → prompt système complet avec clubs/events/locaux/planification en JSON
+ *   buildLocalContexts()        → pour chaque local : filtre events + réservations → agenda trié chronologiquement
+ *   buildEventPlanningContexts() → map event_request_creations → ChatbotEventPlanningContext[]
+ *   classifyMessageScope()      → appel Groq classifier → { inScope: boolean }
+ *   getTodayStart()             → new Date() avec heures à 00:00:00
+ *   getLookaheadDate()          → getTodayStart() + 30 jours
+ *   toDateString()              → Date → "YYYY-MM-DD"
+ *   toIsoString()               → Date → ISO 8601 complet
+ *
+ * TABLE PRISMA : conversations (type='chatbot'), messages, conversation_participants, utilisateurs
+ */
+
 import {
   BadRequestException,
   Injectable,
@@ -12,6 +89,7 @@ import type {
   ChatbotResponseDto,
 } from './chatbot.types';
 
+/** Créneau dans l'agenda d'un local (issu d'un événement ou d'une réservation) */
 type ChatbotAgendaItem = {
   source: 'event' | 'reservation';
   title: string;
@@ -22,6 +100,7 @@ type ChatbotAgendaItem = {
   club?: string | null;
 };
 
+/** Local enrichi avec son agenda des 30 prochains jours (events + réservations) injecté dans le prompt */
 type ChatbotLocalContext = {
   id: string;
   nom: string;
@@ -34,6 +113,7 @@ type ChatbotLocalContext = {
   agenda: ChatbotAgendaItem[];
 };
 
+/** Demande d'événement (event_request_creation) formatée pour le prompt de planification */
 type ChatbotEventPlanningContext = {
   id: string;
   nom: string;
@@ -48,6 +128,7 @@ type ChatbotEventPlanningContext = {
   collaborating_club_ids: string[];
 };
 
+/** Message brut tel que stocké dans la table `messages` de Prisma */
 type ChatbotStoredMessage = {
   id: string;
   conversation_id: string;
@@ -56,6 +137,7 @@ type ChatbotStoredMessage = {
   created_at: Date;
 };
 
+/** Conversation brute depuis Prisma, avec messages et participants inclus */
 type ChatbotStoredConversation = {
   id: string;
   title: string | null;
@@ -64,6 +146,7 @@ type ChatbotStoredConversation = {
   participants: { user_id: string }[];
 };
 
+/** Conversation formatée retournée au front-end via le controller */
 type ChatbotConversation = {
   id: string;
   title: string;
@@ -86,6 +169,10 @@ export class ChatbotService {
     private readonly configService: ConfigService,
   ) {}
 
+  /**
+   * 20 dernières conversations chatbot de l'utilisateur (type='chatbot', DESC).
+   * Inclut messages (ASC) et participants pour le formatage.
+   */
   async getUserConversations(userId: string): Promise<ChatbotConversation[]> {
     const botUserId = await this.getOrCreateChatbotUserId();
     const conversations = await this.prisma.conversations.findMany({
@@ -119,6 +206,7 @@ export class ChatbotService {
     );
   }
 
+  /** Retourne une conversation spécifique. NotFoundException si non trouvée ou n'appartient pas à userId. */
   async getUserConversation(userId: string, conversationId: string) {
     const botUserId = await this.getOrCreateChatbotUserId();
     const conversation = await this.findConversationForUser(
@@ -136,6 +224,11 @@ export class ChatbotService {
     );
   }
 
+  /**
+   * Pipeline complet : charge BDD → classifier scope → prompt → Groq → sauvegarde conversation.
+   * Si OUT_OF_SCOPE → retourne outOfScopeReply sans appel LLM principal.
+   * Si conversationId fourni → continue la conversation existante, sinon en crée une nouvelle.
+   */
   async getChatResponse(
     userId: string,
     history: ChatbotHistoryMessage[] = [],
@@ -336,6 +429,7 @@ export class ChatbotService {
     }
   }
 
+  /** Lazy init du client Groq (singleton) — lit GROQ_API_KEY depuis ConfigService. */
   private getGroqClient() {
     if (this.groqClient) {
       return this.groqClient;
@@ -353,6 +447,7 @@ export class ChatbotService {
     return this.groqClient;
   }
 
+  /** Appelle l'API Groq avec les messages et retourne le texte généré. temperature=0.2 */
   private async generateGroqReply(
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   ) {
@@ -369,6 +464,10 @@ export class ChatbotService {
     );
   }
 
+  /**
+   * Upsert de l'utilisateur virtuel chatbot (email: chatbot@smartchabeb.local, role='CHATBOT').
+   * Cet utilisateur représente l'IA comme expéditeur des messages de réponse en BDD.
+   */
   private async getOrCreateChatbotUserId() {
     const botUser = await this.prisma.utilisateurs.upsert({
       where: { email: this.chatbotUserEmail },
@@ -388,6 +487,7 @@ export class ChatbotService {
     return botUser.id;
   }
 
+  /** findFirst conversation par (id, type='chatbot', created_by=userId) avec messages + participants. */
   private async findConversationForUser(
     userId: string,
     conversationId: string,
@@ -415,6 +515,7 @@ export class ChatbotService {
     return conversation as ChatbotStoredConversation | null;
   }
 
+  /** Convertit une conversation brute (BDD) en ChatbotConversation formatée pour le front. */
   private formatConversation(
     conversation: ChatbotStoredConversation,
     botUserId: string,
@@ -427,6 +528,7 @@ export class ChatbotService {
     };
   }
 
+  /** Convertit les messages BDD en ChatbotHistoryMessage[]. sender_id=botUserId → role='model', sinon 'user'. */
   private formatStoredMessages(
     messages: ChatbotStoredMessage[],
     botUserId: string,
@@ -439,6 +541,7 @@ export class ChatbotService {
       }));
   }
 
+  /** Premier message utilisateur, tronqué à 42 chars + "..." si dépassé. Défaut: 'Nouvelle conversation'. */
   private buildConversationTitle(messages: ChatbotHistoryMessage[]) {
     const firstUserMessage = messages
       .find((message) => message.role === 'user')
@@ -453,6 +556,10 @@ export class ChatbotService {
       : firstUserMessage;
   }
 
+  /**
+   * $transaction : crée la conversation + 2 messages (user + bot) + met à jour last_message_at.
+   * Participants créés : userId (MEMBER) + botUserId (BOT).
+   */
   private async createConversationWithMessages(params: {
     userId: string;
     botUserId: string;
@@ -509,6 +616,9 @@ export class ChatbotService {
     });
   }
 
+  /**
+   * $transaction : ajoute 2 messages (user + bot) à une conversation existante + met à jour last_message_at.
+   */
   private async appendToExistingConversation(params: {
     conversation: ChatbotStoredConversation;
     userId: string;
@@ -546,6 +656,10 @@ export class ChatbotService {
     return conversation;
   }
 
+  /**
+   * Convertit ChatbotHistoryMessage[] → format Groq (role 'model' → 'assistant').
+   * Filtre les messages vides, prend les 8 derniers (maxHistoryMessages), joint les parts en \n.
+   */
   private normalizeHistory(
     history: ChatbotHistoryMessage[],
   ): Array<{ role: 'user' | 'assistant'; content: string }> {
@@ -572,12 +686,18 @@ export class ChatbotService {
       });
   }
 
+  /** Alias de normalizeHistory — utilisé pour convertir l'historique chargé depuis la BDD. */
   private toGroqMessages(
     history: ChatbotHistoryMessage[],
   ): Array<{ role: 'user' | 'assistant'; content: string }> {
     return this.normalizeHistory(history);
   }
 
+  /**
+   * Construit le prompt système en français avec les données JSON injectées.
+   * Contient les règles métier + CLUBS, EVENEMENTS, LOCAUX_ET_DISPONIBILITE, PLANIFICATION_EVENEMENTS.
+   * Le modèle est instructed à refuser les sujets hors périmètre.
+   */
   private buildSystemPrompt(
     clubs: any[],
     events: any[],
@@ -603,6 +723,7 @@ export class ChatbotService {
     ].join('\n');
   }
 
+  /** Formate les event_request_creations pour le prompt : dates ISO, noms de club/local. */
   private buildEventPlanningContexts(
     eventRequests: any[],
   ): ChatbotEventPlanningContext[] {
@@ -621,6 +742,10 @@ export class ChatbotService {
     }));
   }
 
+  /**
+   * Appel Groq classifier (temperature=0) → répond IN_SCOPE ou OUT_OF_SCOPE.
+   * En cas d'erreur Groq → fallback inScope=true (ne bloque pas l'utilisateur).
+   */
   private async classifyMessageScope(
     userMessage: string,
   ): Promise<{ inScope: boolean }> {
@@ -659,6 +784,11 @@ export class ChatbotService {
     }
   }
 
+  /**
+   * Enrichit chaque local avec son agenda des 30 prochains jours.
+   * Fusionne events (filtrés par local.nom) et réservations (filtrées par local.id).
+   * Trie l'agenda chronologiquement par "YYYY-MM-DDThh:mm" via localeCompare.
+   */
   private buildLocalContexts(
     locaux: any[],
     events: any[],
@@ -710,22 +840,26 @@ export class ChatbotService {
     });
   }
 
+  /** Retourne aujourd'hui à 00:00:00 (heure locale). Borne inférieure des requêtes BDD. */
   private getTodayStart() {
     const date = new Date();
     date.setHours(0, 0, 0, 0);
     return date;
   }
 
+  /** Retourne aujourd'hui + availabilityLookaheadDays (30j). Borne supérieure des réservations. */
   private getLookaheadDate() {
     const date = this.getTodayStart();
     date.setDate(date.getDate() + this.availabilityLookaheadDays);
     return date;
   }
 
+  /** Convertit une Date en "YYYY-MM-DD" (10 premiers chars ISO). */
   private toDateString(value: Date) {
     return value.toISOString().slice(0, 10);
   }
 
+  /** Convertit une Date en chaîne ISO 8601 complète (ex: "2024-01-15T09:00:00.000Z"). */
   private toIsoString(value: Date) {
     return value.toISOString();
   }

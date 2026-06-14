@@ -1,3 +1,45 @@
+/**
+ * ============================================================
+ * FICHIER : messagerie.gateway.ts
+ * RÔLE    : Serveur WebSocket (Socket.IO) pour la messagerie temps-réel.
+ * ============================================================
+ *
+ * CONCEPT :
+ *   MessagerieGateway gère la couche WebSocket du module messagerie.
+ *   Chaque connexion est authentifiée via JWT (lu dans handshake.auth.token
+ *   ou header Authorization: Bearer <token>). Sans token valide → déconnexion immédiate.
+ *   Le userId authentifié est stocké dans client.data.userId.
+ *
+ * ROOMS SOCKET.IO :
+ *   Chaque conversation correspond à une room "conversation:<conversationId>".
+ *   Un client doit émettre "conversation:join" avant de recevoir les événements.
+ *   Seuls les membres réels (table conversation_participants) peuvent joindre.
+ *
+ * ÉVÉNEMENTS ENTRANTS (client → serveur) :
+ *   "conversation:join"   { conversationId }
+ *     → Vérifie la participation → joint la room → émet l'état actuel des typers.
+ *   "conversation:leave"  { conversationId }
+ *     → Quitte la room Socket.IO.
+ *   "conversation:typing" { conversationId, isTyping: boolean }
+ *     → Met à jour conversation_participants.last_typing_at (null si isTyping=false).
+ *     → Émet "conversation:typing" à TOUS les membres de la room.
+ *
+ * ÉVÉNEMENTS SORTANTS (serveur → client) :
+ *   "conversation:typing" { conversationId, users: User[], updatedAt: string }
+ *     → Liste des utilisateurs ayant tapé dans les 8 dernières secondes (excluant soi-même).
+ *
+ * FENÊTRE DE TYPING : typingWindowMs = 8 000 ms.
+ *
+ * DÉCONNEXION :
+ *   handleDisconnect() remet last_typing_at à null pour tous les participants
+ *   de l'utilisateur déconnecté, évitant un état "en train d'écrire" fantôme.
+ *
+ * AUTHENTIFICATION JWT :
+ *   extractToken() lit d'abord handshake.auth.token, puis le header Authorization.
+ *   jwtService.verifyAsync() utilise JWT_SECRET (via ConfigService).
+ *   Le payload JWT doit contenir { sub: userId }.
+ */
+
 import { JwtService } from '@nestjs/jwt';
 import {
   ConnectedSocket,

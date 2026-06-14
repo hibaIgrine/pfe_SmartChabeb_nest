@@ -1,3 +1,9 @@
+/**
+ * Test unitaire minimal pour SocialMediaService.
+ * ATTENTION : le test actuel injecte SocialMediaService sans ses dépendances réelles
+ * (PrismaService, NotificationsService), ce qui provoque une erreur à l'exécution.
+ * À compléter avec des mocks avant d'ajouter des tests de logique.
+ */
 import { Test, TestingModule } from '@nestjs/testing';
 import { SocialMediaService } from './social-media.service';
 

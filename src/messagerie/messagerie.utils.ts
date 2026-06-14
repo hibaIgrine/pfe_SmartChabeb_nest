@@ -1,3 +1,37 @@
+/**
+ * ============================================================
+ * FICHIER : messagerie.utils.ts
+ * RÔLE    : Fonctions pures utilitaires partagées dans le module messagerie.
+ * ============================================================
+ *
+ *   buildPrivateConversationKey(id1, id2) → string
+ *     Génère une clé déterministe pour une conversation privée.
+ *     Les IDs sont triés lexicographiquement et joints par ":" → (A,B) === (B,A).
+ *     Sert à conversations.upsert({ where: { private_key } }) pour l'idempotence.
+ *
+ *   normalizeMessageContent(content?) → string | null
+ *     Trim le texte ; retourne null si vide ou non-string.
+ *
+ *   normalizeMediaUrls(media?) → string[] | null
+ *     Déduplique et trim les URLs média ; retourne null si tableau vide.
+ *
+ *   normalizeUserIds(userIds?) → string[]
+ *     Déduplique et trim les UUIDs ; retourne [] si absent.
+ *
+ *   normalizeConversationTitle(title?) → string | null
+ *     Trim le titre de groupe ; retourne null si vide ou non-string.
+ *
+ *   assertPrivateMessagePayload(type, content, media) → void | throws
+ *     Valide qu'un message TEXT a du contenu, ou qu'un message IMAGE/VIDEO/DOCUMENT
+ *     possède au moins un fichier média. Lance BadRequestException sinon.
+ *
+ *   assertGroupMessagePayload(type, content, media) → void | throws
+ *     Alias de assertPrivateMessagePayload (même règle pour les groupes).
+ *
+ *   assertValidGroupTitle(title) → void | throws
+ *     Lance BadRequestException si le titre du groupe est null/vide.
+ */
+
 import { BadRequestException } from '@nestjs/common';
 
 export function buildPrivateConversationKey(

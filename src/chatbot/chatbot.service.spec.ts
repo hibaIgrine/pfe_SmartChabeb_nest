@@ -1,3 +1,9 @@
+/**
+ * Test unitaire pour ChatbotService.
+ * PrismaService et ConfigService sont mockés pour éviter les appels BDD et API.
+ * Les findMany renvoient [] par défaut — le service doit s'initialiser sans données.
+ * GROQ_API_KEY fictive ('test-groq-key') fournie via configMock pour éviter l'erreur de démarrage.
+ */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ChatbotService } from './chatbot.service';
 import { PrismaService } from '../prisma/prisma.service';

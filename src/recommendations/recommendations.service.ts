@@ -1,3 +1,90 @@
+/**
+ * ============================================================
+ * FICHIER : recommendations.service.ts
+ * RÔLE    : Logique métier — pont entre NestJS et le modèle ML (Flask).
+ * ============================================================
+ *
+ * CONSTANTE :
+ *   flaskUrl = config.get('FLASK_URL', 'http://localhost:5000')
+ *     URL du micro-service ML Flask. Configurable via variable d'environnement.
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * HELPERS PRIVÉS
+ * ─────────────────────────────────────────────────────────────────
+ *
+ * extractErrorMessage(error: unknown) → string
+ *   Extraction sécurisée du message d'erreur depuis n'importe quel type
+ *   (erreur Axios, erreur réseau, string...).
+ *
+ * toRecommendationItems(value: unknown) → RecommendationItem[]
+ *   Convertit la réponse JSON brute de Flask en tableau de RecommendationItem typé.
+ *   Vérifie que chaque item a bien les propriétés { activite, probabilite }.
+ *   Filtre les items malformés (.filter(item => item !== null)).
+ *   Protège contre une réponse Flask inattendue ou corrompue.
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * predict(session: Session, topK = 3) → Recommendation
+ * ─────────────────────────────────────────────────────────────────
+ *
+ *   RÔLE : Appelle Flask /predict avec les 30 features de la session
+ *   et persiste le résultat dans recommendation_history.
+ *
+ *   ÉTAPE 1 — Construction du payload Flask (mappage Session → JSON) :
+ *     nom_dataset : session.club.nom_dataset ?? session.club.nom
+ *       → Priorité au nom dataset (aligné sur le LabelEncoder Nom_Club).
+ *       → Fallback sur le nom affiché si nom_dataset est null.
+ *     club        : session.club.nom (fallback humain)
+ *     domaine     : session.club.domaine (résolu par resolveDomaine())
+ *     activite_j_minus_2, activite_precedente : null → 'Aucune' (attendu par Flask)
+ *     top_k       : nombre de recommandations demandées (1-10)
+ *
+ *   ÉTAPE 2 — Appel HTTP avec HttpService (@nestjs/axios) :
+ *     this.http.post(`${flaskUrl}/predict`, payload)
+ *     firstValueFrom() : convertit Observable RxJS en Promise.
+ *     Retourne { data } avec la réponse Flask.
+ *
+ *   ÉTAPE 3 — Extraction des recommandations :
+ *     data.recommendations : tableau de { activite, probabilite } depuis Flask
+ *     data.model           : nom du modèle ML utilisé
+ *
+ *   ÉTAPE 4 — Persistance dans recommendation_history :
+ *     Crée un enregistrement avec :
+ *       session_id       : ID de la session d'entrée
+ *       recommandations  : JSON du tableau de RecommendationItem
+ *       modele_utilise   : nom du modèle Flask
+ *       activite_choisie : null (pas encore validé par le coach)
+ *
+ *   ÉTAPE 5 — Retour :
+ *     Objet Recommendation typé avec recommandations parsées via toRecommendationItems().
+ *
+ *   ERREUR :
+ *     HttpException 502 Bad Gateway si Flask est injoignable ou renvoie une erreur.
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * findBySession(sessionId: number) → Recommendation[]
+ * ─────────────────────────────────────────────────────────────────
+ *   Récupère toutes les recommandations générées pour une session donnée.
+ *   Triées par created_at DESC (la plus récente en premier).
+ *   Chaque ligne est mappée via toRecommendationItems().
+ *   Utilisé pour afficher l'historique des prédictions d'une session.
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * updateChoice(recoId: number, activite: string) → Recommendation
+ * ─────────────────────────────────────────────────────────────────
+ *   Met à jour activite_choisie dans recommendation_history.
+ *   NotFoundException si la recommandation n'existe pas.
+ *   C'est l'action de VALIDATION du coach : il confirme quelle activité
+ *   parmi les suggestions il va effectivement réaliser lors de la prochaine séance.
+ *   Ce feedback (activite_choisie) constitue le "label terrain" qui pourra
+ *   servir à réentraîner le modèle ML dans une future itération.
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * TABLE PRISMA : recommendation_history
+ * ─────────────────────────────────────────────────────────────────
+ *   id, session_id (FK), recommandations (Json), modele_utilise (string),
+ *   activite_choisie (string | null), created_at
+ */
+
 import { HttpException, Injectable, NotFoundException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';

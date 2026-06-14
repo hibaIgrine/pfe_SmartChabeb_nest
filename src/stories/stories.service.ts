@@ -1,3 +1,57 @@
+/**
+ * ============================================================
+ * FICHIER : stories.service.ts
+ * RÔLE    : Logique métier des stories éphémères.
+ * ============================================================
+ *
+ * TYPE INTERNE :
+ *   StoryMediaItem — { type: 'image'|'video', url: string, textY?: number }
+ *     textY : position verticale du texte superposé sur le média (en %).
+ *
+ * HELPERS PRIVÉS :
+ *
+ *   normalizeMedia(media: unknown) → StoryMediaItem[] | undefined
+ *     Normalisation défensive du champ media (stocké en JSON Prisma, peut arriver
+ *     comme Array, string JSON ou objet unique selon le contexte d'appel).
+ *     Filtre les items invalides (url/type manquants, textY non-number).
+ *
+ *   normalizeStory<T extends { media? }>(story: T) → T avec media normalisé
+ *     Applique normalizeMedia sur story.media pour garantir un type cohérent en sortie.
+ *
+ * MÉTHODES PUBLIQUES :
+ *
+ *   createStory(userId, dto)
+ *     expires_at = now + 24h (86 400 000 ms).
+ *     Insère dans stories avec include user + views.
+ *     Retourne la story normalisée.
+ *
+ *   getActiveStoriesByUser(userId, currentUserId)
+ *     WHERE user_id=userId AND expires_at > now.
+ *     Enrichit chaque story de { hasViewed, viewCount } pour le currentUserId.
+ *     Inclut les vues avec info viewer (id, nom, prenom, photo).
+ *
+ *   getActiveStoriesForFeed(currentUserId)
+ *     WHERE expires_at > now AND user_id ≠ currentUserId.
+ *     Groupement JS via Map<userId, story> : 1 seule story par auteur (la plus récente).
+ *     Enrichit chaque story de { hasViewed, viewCount }.
+ *
+ *   getMyStoriesArchive(userId)
+ *     Toutes les stories de l'utilisateur, actives ET expirées.
+ *     Enrichit de { hasViewed: false, viewCount, isExpired: expires_at <= now }.
+ *
+ *   markStoryAsViewed(storyId, viewerId)
+ *     create story_views. Si P2002 (doublon) → findUnique (idempotent).
+ *     Pas d'erreur si déjà vu — la vue existe déjà, on la retourne.
+ *
+ *   deleteStory(storyId, userId, isAdmin?)
+ *     deleteMany WHERE id=storyId [AND user_id=userId si pas admin].
+ *     Utilise deleteMany (pas delete) pour éviter une exception si la story n'existe pas.
+ *
+ *   deleteExpiredStories()
+ *     Suppression physique des stories expirées. Destiné à être appelé par un cron job.
+ *     WHERE expires_at < now.
+ */
+
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStoryDto } from './dto/create-story.dto';
@@ -190,15 +244,8 @@ export class StoriesService {
       },
     });
 
-    // Grouper par utilisateur et prendre la plus récente
-    const grouped = new Map();
-    stories.forEach((story) => {
-      if (!grouped.has(story.user_id)) {
-        grouped.set(story.user_id, story);
-      }
-    });
-
-    return Array.from(grouped.values()).map((story) =>
+    // Retourner toutes les stories actives (toutes les stories de tous les auteurs)
+    return stories.map((story) =>
       this.normalizeStory({
         ...story,
         hasViewed: story.views.some((v) => v.viewer_id === currentUserId),

@@ -1,3 +1,60 @@
+/**
+ * ============================================================
+ * FICHIER : payments.controller.ts
+ * RÔLE    : Routes HTTP pour la gestion des paiements Stripe.
+ * ============================================================
+ *
+ * BASE URL : /payments
+ *
+ * ROUTES EXPOSÉES :
+ *
+ *   GET /payments/my-payments                     [JWT requis]
+ *     → Retourne les paiements PAID visibles par l'utilisateur.
+ *     → ADMIN : voit TOUS les paiements PAID avec détails (local, centre).
+ *     → Autres : voit uniquement ses propres paiements (filtre reservation.id_utilisateur).
+ *     → Inclut : amount, status, reservation (objet, local.nom, date), stripe_session_id.
+ *
+ *   GET /payments/admin/centre-revenues            [ADMIN]
+ *     → Revenus agrégés par centre (tous les paiements PAID).
+ *     → Query params :
+ *         scope  = 'month' | autre → filtre au mois ou vue globale
+ *         month  = 'YYYY-MM'       → mois à analyser (défaut : mois courant)
+ *     → Retourne : totalAmount, totalPayments, centres[] triés par revenu desc.
+ *
+ *   GET /payments/centre/revenues                  [RESPONSABLE_CENTRE]
+ *     → Revenus du centre de l'utilisateur, ventilés par local.
+ *     → Mêmes query params que ci-dessus (scope, month).
+ *     → Retourne : totalAmount, totalPayments, centre{...}, locaux[] triés par revenu desc.
+ *
+ *   POST /payments/create
+ *     → Crée un paiement en BDD (PENDING) + session Stripe Checkout.
+ *     → Body : CreatePaymentDto { reservationId, amount (TND), returnUrl }
+ *     → Retourne : { checkoutUrl, paymentId }
+ *     → checkoutUrl est l'URL Stripe vers laquelle rediriger l'utilisateur.
+ *
+ *   POST /payments/pay-reservation
+ *     → Raccourci pour payer une réservation sans spécifier le montant.
+ *     → Body : { reservationId, returnUrl? }
+ *     → Vérifie que la réservation est EN_ATTENTE ou VALIDEE.
+ *     → Récupère prix_total depuis la BDD et appelle createPaymentAndSession.
+ *     → returnUrl par défaut : http://localhost:5173/reservations/my-reservations
+ *     → Retourne : { checkoutUrl, paymentId, amount }
+ *
+ *   POST /payments/webhook                         [Stripe uniquement]
+ *     → Reçoit les événements Stripe (checkout.session.completed, expired, etc.)
+ *     → Vérifie la signature via l'en-tête 'stripe-signature' + STRIPE_WEBHOOK_SECRET.
+ *     → Signature invalide → retour 400.
+ *     → Si valide → appelle handleWebhookEvent(event) dans PaymentsService.
+ *     → IMPORTANT : le rawBody doit être le corps brut (non parsé) pour la vérification.
+ *       NestJS doit être configuré avec rawBody: true dans main.ts.
+ *
+ * RBAC :
+ *   /my-payments : AuthGuard('jwt') — tous les utilisateurs authentifiés
+ *   /admin/centre-revenues : ADMIN seulement
+ *   /centre/revenues : RESPONSABLE_CENTRE seulement
+ *   /create, /pay-reservation, /webhook : pas de garde de rôle (accès ouvert)
+ */
+
 import {
   Body,
   Controller,
@@ -29,6 +86,10 @@ export class PaymentsController {
     private stripe: StripeService,
   ) {}
 
+  /**
+   * GET /payments/my-payments
+   * Paiements PAID visibles : ADMIN → tous, autres → uniquement les siens.
+   */
   @Get('my-payments')
   @UseGuards(AuthGuard('jwt'))
   async getMyPayments(@Req() req) {
@@ -42,6 +103,11 @@ export class PaymentsController {
     return await this.payments.getUserPayments(userId, userRole);
   }
 
+  /**
+   * GET /payments/admin/centre-revenues
+   * Revenus de TOUS les centres agrégés par centre, triés par totalAmount desc.
+   * scope='month' + month='YYYY-MM' pour filtrer sur un mois précis.
+   */
   @Get('admin/centre-revenues')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('ADMIN')
@@ -52,6 +118,11 @@ export class PaymentsController {
     return await this.payments.getAdminCentreRevenueOverview(scope, month);
   }
 
+  /**
+   * GET /payments/centre/revenues
+   * Revenus du centre de l'utilisateur connecté, ventilés par local.
+   * scope='month' + month='YYYY-MM' pour filtrer sur un mois précis.
+   */
   @Get('centre/revenues')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles('RESPONSABLE_CENTRE')
@@ -63,6 +134,11 @@ export class PaymentsController {
     return await this.payments.getCentreRevenueForResponsable(req.user.userId, scope, month);
   }
 
+  /**
+   * POST /payments/create
+   * Crée un paiement PENDING en BDD puis une session Stripe Checkout.
+   * Retourne { checkoutUrl, paymentId } — rediriger l'utilisateur vers checkoutUrl.
+   */
   @Post('create')
   async create(@Body() body: CreatePaymentDto) {
     const { reservationId, amount, returnUrl } = body as any;
@@ -76,6 +152,11 @@ export class PaymentsController {
     return { checkoutUrl, paymentId: result.payment.id };
   }
 
+  /**
+   * POST /payments/pay-reservation
+   * Raccourci pour payer une réservation : récupère prix_total depuis la BDD.
+   * Vérifie que statut est EN_ATTENTE ou VALIDEE. returnUrl est optionnel.
+   */
   @Post('pay-reservation')
   async payReservation(
     @Body() body: { reservationId: string; returnUrl?: string },
@@ -114,6 +195,12 @@ export class PaymentsController {
     };
   }
 
+  /**
+   * POST /payments/webhook
+   * Point d'entrée Stripe — vérifie la signature 'stripe-signature', puis dispatche l'événement.
+   * checkout.session.completed → PAID + réservation CONFIRME
+   * checkout.session.expired  → CANCELLED
+   */
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
   async webhook(

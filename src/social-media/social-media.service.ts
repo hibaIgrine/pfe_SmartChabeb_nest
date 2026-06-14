@@ -1,3 +1,117 @@
+/**
+ * ============================================================
+ * FICHIER : social-media.service.ts
+ * RÔLE    : Logique métier complète du réseau social.
+ * ============================================================
+ *
+ * TYPES INTERNES :
+ *   NormalizedPublicationMediaItem — { type, url, name? } après normalisation
+ *   PostWithFavoriteMeta<T>        — T enrichi de { is_favorite, favorite_count }
+ *   PostVisibility                 — 'PUBLIC' | 'PRIVATE' | 'MASKED'
+ *   COMMENT_REPLY_TOKEN_REGEX      — /\[\[reply:(.*?)\]\]/ pour détecter les réponses imbriquées
+ *
+ * SÉLECTION COMMUNE (postInclude) :
+ *   user (id/nom/prenom/photo), hashtags (triés), mentions (avec mentioned_user),
+ *   hidden_users (avec hidden_user), _count.comments.
+ *
+ * === GESTION DES PUBLICATIONS ===
+ *
+ *   createPost(userId, dto)
+ *     Normalise media, hashtags, mentions, hidden_users, location, visibility.
+ *     ensurePublicationContent() → au moins un champ non-vide requis.
+ *     $transaction : create post → createMany hashtags → createMany mentions → createMany hidden_users.
+ *     Hors transaction : notifyPostMentions (destinataires ≠ auteur).
+ *     Retourne le post enrichi avec withFavoriteMetaList.
+ *
+ *   findPosts(limit?, offset?, currentUserId?)
+ *     Pagination (limit max 100, offset min 0).
+ *     Filtre visibilité selon contexte : PUBLIC toujours, PRIVATE si follower, MASKED si non dans hidden_users.
+ *     Exclut les posts des utilisateurs masqués (getHiddenUserIdsFor).
+ *     Enrichit chaque post avec réactions (getReactions) et withFavoriteMetaList.
+ *
+ *   findPostById(postId, currentUserId?)
+ *     ensurePostVisibleToUser → ForbiddenException si privé/masqué.
+ *     Inclut les commentaires (triés par date asc).
+ *
+ *   findPostsByUser(targetUserId, currentUserId, limit?, offset?)
+ *     Vérifie que l'auteur cible n'est pas masqué par currentUserId.
+ *     Filtre visibilité selon relation follower.
+ *
+ *   updatePost(postId, userId, dto)
+ *     Auteur uniquement (ForbiddenException sinon).
+ *     Champs optionnels : si absent → conserve la valeur existante.
+ *     $transaction : update post + deleteMany+createMany hashtags/mentions/hidden_users si modifiés.
+ *     Notifie uniquement les nouvelles mentions (diff vs précédentes).
+ *
+ *   deletePost(postId, userId, isAdmin?)
+ *     Auteur ou ADMIN uniquement.
+ *
+ *   sharePost(postId, userId, dto)
+ *     ensurePostVisibleToUser → copie media + hashtags + mentions.
+ *     Encode le post source en base64 dans un token [[shared:<b64>]].
+ *     Le message personnel de l'utilisateur est ajouté avant le token.
+ *
+ * === FAVORIS ===
+ *
+ *   addPostToFavorites(postId, userId)    → upsert post_favorites (idempotent).
+ *   removePostFromFavorites(postId, userId) → deleteMany post_favorites.
+ *   findMyFavoritePosts(userId, limit?, offset?) → filtre visibilité + hidden_users.
+ *   getMyFavoritePostsCount(userId) → count(post_favorites WHERE user_id=userId).
+ *
+ *   buildFavoriteMeta(postIds, currentUserId?)
+ *     groupBy post_id → Map<postId, count> + Set<postId> pour les favoris de l'utilisateur.
+ *   withFavoriteMeta / withFavoriteMetaList
+ *     Enrichit les posts avec { is_favorite, favorite_count }.
+ *
+ * === COMMENTAIRES ===
+ *
+ *   createComment(postId, userId, dto)
+ *     Vérifie la visibilité du post et que l'auteur n'est pas masqué.
+ *     Token [[reply:commentId]] : si présent → notifie l'auteur du commentaire parent.
+ *     Notifie l'auteur du post (sauf si c'est l'auteur lui-même ou le repliedUser).
+ *     Notifie les mentions (sauf auteur, auteur du post, repliedUser).
+ *
+ *   updateComment(postId, commentId, userId, dto) → auteur uniquement.
+ *   deleteComment(postId, commentId, userId, isAdmin?) → auteur ou ADMIN.
+ *   findCommentsByPost(postId, currentUserId) → chronologiquement asc.
+ *
+ * === MASQUAGE D'UTILISATEURS ===
+ *
+ *   hideUser(userId, userIdToHide)   → upsert user_hidden_users. Soi-même interdit.
+ *   unhideUser(userId, userIdToUnhide) → deleteMany user_hidden_users.
+ *   findHiddenUsers(userId) → liste avec info de l'utilisateur masqué.
+ *
+ * === RÉACTIONS ===
+ *
+ *   addReaction(postId, userId, reactionType)
+ *     Upsert post_reactions (1 réaction par user par post, peut changer de type).
+ *     Notifie l'auteur seulement si nouvelle réaction ET post ≠ soi-même.
+ *     Types : like, love, wow, bravo, instructif, soutien, haha.
+ *
+ *   removeReaction(postId, userId) → deleteMany post_reactions.
+ *
+ *   getReactions(postId, currentUserId?)
+ *     → { aggregated: { [type]: User[] }, total: number, userReaction: string | null }
+ *
+ * === HELPERS PRIVÉS ===
+ *
+ *   normalizeMedia(media?)          → filtre items invalides, trim url/name.
+ *   parseStoredMedia(media)         → convertit Prisma.JsonValue en NormalizedPublicationMediaItem[].
+ *   normalizeHashtags(hashtags?)    → lowercase, sans #, espaces→_, dédupliqué.
+ *   normalizeVisibility(v?)         → 'PUBLIC' | 'PRIVATE' | 'MASKED' (défaut PUBLIC).
+ *   normalizeHiddenUserIds(ids?)    → déduplication trim.
+ *   normalizeMentionUserIds(ids?)   → déduplication trim.
+ *   canUserViewPost(post, userId?, isFollowing?) → logique de visibilité pure.
+ *   ensurePostVisibleToUser(postId, userId) → vérifie PRIVATE + MASKED + hidden users.
+ *   getHiddenUserIdsFor(userId)     → user_hidden_users WHERE user_id=userId.
+ *   getFollowingUserIdsFor(userId)  → user_follows WHERE follower_id=userId.
+ *   ensureMentionUsersExist(ids)    → count(utilisateurs WHERE id IN ids), BadRequest si manquant.
+ *   notifyPostMentions(authorId, postId, mentionIds) → createPostMentionNotification pour chacun.
+ *   ensurePublicationContent(...)   → BadRequest si aucun champ renseigné.
+ *   getPostOrThrow(postId)          → NotFoundException si post absent.
+ *   parseReplyToCommentId(content)  → extrait l'ID du commentaire parent depuis [[reply:...]].
+ */
+
 import {
   BadRequestException,
   ForbiddenException,

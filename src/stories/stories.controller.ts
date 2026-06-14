@@ -1,3 +1,41 @@
+/**
+ * ============================================================
+ * FICHIER : stories.controller.ts
+ * RÔLE    : Routes HTTP REST des stories éphémères.
+ * ============================================================
+ *
+ * BASE URL : /stories
+ * Toutes les routes sont protégées individuellement par @UseGuards(AuthGuard('jwt')).
+ *
+ * ROUTES EXPOSÉES :
+ *
+ *   POST /stories/create                      [JWT requis]
+ *     body: CreateStoryDto { content?, media?: [{ type, url, textY? }] }
+ *     → Crée une story qui expirera 24h après sa création.
+ *     → Retourne la story avec user + views normalisés.
+ *
+ *   GET  /stories/feed                        [JWT requis]
+ *     → Retourne 1 story active par auteur (la plus récente), excluant soi-même.
+ *     → Chaque story est enrichie de { hasViewed, viewCount }.
+ *     → Utilisé pour afficher les bulles de stories dans le fil d'actualité.
+ *
+ *   GET  /stories/user/:userId                [JWT requis]
+ *     → Retourne toutes les stories actives d'un utilisateur donné.
+ *     → Enrichi de { hasViewed } selon l'utilisateur courant.
+ *
+ *   GET  /stories/me/archive                  [JWT requis]
+ *     → Toutes les stories de l'utilisateur courant (actives + expirées).
+ *     → Enrichi de { isExpired, viewCount }.
+ *
+ *   POST /stories/:storyId/view               [JWT requis]
+ *     → Marque une story comme vue par l'utilisateur courant.
+ *     → Idempotent : une deuxième vue sur la même story retourne l'enregistrement existant.
+ *
+ *   DELETE /stories/:storyId                  [JWT requis]
+ *     → Supprime une story (auteur uniquement ou ADMIN selon req.user.role).
+ *     → Utilise deleteMany pour ne pas lancer d'exception si la story est introuvable.
+ */
+
 import {
   Controller,
   Post,

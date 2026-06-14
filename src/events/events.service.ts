@@ -1,3 +1,171 @@
+/**
+ * ============================================================
+ * FICHIER : events.service.ts
+ * RÔLE    : Logique métier pour la gestion des événements.
+ * ============================================================
+ *
+ * CONSTANTES :
+ *   pointsPerParticipation = 10  → points attribués lors du check-in
+ *   timeRegex               → valide les horaires HH:mm ou HH:mm:ss
+ *   participantStatuses     → EN_ATTENTE | CONFIRME | REFUSE | ANNULE
+ *
+ * MÉTHODES PRIVÉES (helpers) :
+ *
+ *   addDays / addMonths
+ *     → Créent une copie d'une date avec N jours ou mois ajoutés (immuables).
+ *
+ *   normalizeDateOnly(date)
+ *     → Normalise une Date à minuit (supprime la composante horaire).
+ *     → Ex: "2025-09-15T14:30:00Z" → new Date("2025-09-15T00:00:00")
+ *
+ *   buildOccurrenceDates(baseDate, recurrenceType, recurrenceCount, recurrenceUntil)
+ *     → Génère la liste des dates d'occurrence. Types : NONE, DAILY, WEEKLY, MONTHLY.
+ *     → Limite : max 52 occurrences. Arrêt si dépasse recurrenceUntil.
+ *     → NOTE : la récurrence est désactivée en prod (1 seule occurrence dans create).
+ *
+ *   buildTimeOnDate(date, time)
+ *     → Combine une date et un horaire en un DateTime complet.
+ *
+ *   normalizeTimeToHHMM / timeToMinutes
+ *     → Normalisent un horaire en "HH:mm" et le convertissent en minutes.
+ *
+ *   normalizeTimeline(timeline, eventStartTime, eventEndTime)
+ *     → Valide le programme détaillé de l'événement :
+ *         - titre non vide, formats horaires, end > start
+ *         - étapes dans les bornes de l'événement
+ *         - pas de chevauchement entre étapes (après tri par start_time)
+ *     → Retourne undefined si pas de timeline, [] si tableau vide.
+ *
+ *   findConflicts(localId, dateEvent, startDateTime, endDateTime, excludeEventId?)
+ *     → Cherche les événements actifs en conflit sur le même local et la même date.
+ *     → 3 cas de chevauchement (identique à checkAvailability des réservations) :
+ *         OR[0]: start ≤ debut AND end > debut   (commence pendant existant)
+ *         OR[1]: start < fin   AND end ≥ fin     (finit pendant existant)
+ *         OR[2]: start ≥ debut AND end ≤ fin     (totalement englobé)
+ *     → excludeEventId : auto-exclusion lors d'une modification.
+ *
+ *   resolveRequester(userId)
+ *     → Charge l'utilisateur (id, role, id_centre). NotFoundException si absent.
+ *
+ *   buildDateTimes(dateEvent, startTime, endTime)
+ *     → Parse et valide les dates/heures. BadRequestException si invalide ou end ≤ start.
+ *
+ *   resolveLocalAndClub(locauxId, clubId)
+ *     → Charge local + club en parallèle (Promise.all). Vérifie même centre.
+ *
+ *   resolveLocal(locauxId)
+ *     → Charge uniquement le local (id, id_centre, nom).
+ *
+ *   normalizeClubSelection(clubId?, clubIds?)
+ *     → Déduplique et fusionne club_id + club_ids.
+ *     → Retourne { primaryClubId, collaboratingClubIds }.
+ *
+ *   getManagedClubIds(userId)
+ *     → Retourne les IDs des clubs actifs dont l'utilisateur est id_coach.
+ *
+ *   resolveClubsForEvent(localCentreId, primaryClubId, collaboratingClubIds, requesterId, requesterRole)
+ *     → Valide tous les clubs associés : existence, actifs, même centre, droits RBAC.
+ *     → RESPONSABLE_CLUB doit gérer au moins un des clubs.
+ *     → Retourne { primaryClub, collaboratingClubIds }.
+ *
+ *   assertCanManageEvent(requester, localCentreId, club)
+ *     → RBAC événement :
+ *         ADMIN       → toujours autorisé
+ *         RESP_CENTRE → son id_centre = centre du local
+ *         RESP_CLUB   → il est id_coach du club principal
+ *         Autres      → ForbiddenException
+ *
+ *   resolveEventForManagement(eventId)
+ *     → Charge l'événement avec club et local. NotFoundException si absent.
+ *
+ *   countConfirmedParticipants(eventId, excludeId?)
+ *     → Compte les CONFIRME (avec auto-exclusion optionnelle pour update statut).
+ *
+ *   buildFeedbackSummary(eventId, userId)
+ *     → Promise.all : stats agrégées, 10 derniers feedbacks, mon feedback,
+ *       ma participation, start_time de l'événement.
+ *     → canRate = participé (CONFIRME/ANNULE) ET start_time ≤ now.
+ *
+ *   buildVisibilityWhere(requester, includeInactive)
+ *     → Filtre Prisma selon le rôle :
+ *         ADMIN       → tout (ou actifs si !includeInactive)
+ *         RESP_CENTRE → son centre (local.id_centre)
+ *         RESP_CLUB   → ses clubs (id_coach OU hasSome collaborating_club_ids)
+ *         Autres      → { is_active: true }
+ *
+ * MÉTHODES PUBLIQUES :
+ *
+ *   create(userId, dto)
+ *     → Pipeline : résolution demandeur/local/clubs → RBAC → buildDateTimes
+ *       → normalizeTimeline → vérification conflits (events + réservations)
+ *       → $transaction : create event (is_active=false si RESP_CLUB) + createMany réservations VALIDEE.
+ *
+ *   findAll(userId, includeInactive)
+ *     → buildVisibilityWhere → findMany. Trié par date_event + start_time ASC.
+ *
+ *   getDashboardStats(userId, includeInactive, centreId?, gouvernorat?)
+ *     → Agrégation JS en mémoire (Maps) sur les événements visibles.
+ *     → Retourne : top 5 events, top 8 clubs, top 10 users, fréquence mensuelle,
+ *       tauxParticipation = eventsAvecPart / total × 100,
+ *       tauxRemplissage   = totalConfirmés / totalCapacité × 100.
+ *
+ *   findMyParticipations(userId, includeInactive)
+ *     → OR : inscrit (non ANNULE) OU membre ACCEPTE du club lié.
+ *     → Ajoute my_participation_status + my_participation_checkin à chaque résultat.
+ *
+ *   findOne(userId, eventId)
+ *     → Détail complet avec vérification RBAC et fusion buildFeedbackSummary.
+ *
+ *   getEventFeedback(eventId, userId)
+ *     → Vérifie existence + droits (findOne) → buildFeedbackSummary.
+ *
+ *   submitEventFeedback(eventId, userId, dto)
+ *     → Valide participation + début événement + note 1-5 + commentaire max 500c.
+ *     → Upsert feedback. Retourne feedback + nouvelle moyenne + count.
+ *
+ *   update(userId, eventId, dto)
+ *     → Double RBAC (avant + après changement local/clubs).
+ *     → findConflicts avec excludeEventId. Mise à jour Prisma.
+ *     → Détecte champs modifiés → supprime anciennes notifs → envoie nouvelles.
+ *
+ *   setActive(userId, eventId, isActive)
+ *     → Active ou désactive un événement (sans notifications).
+ *
+ *   refuseEventRequest(userId, eventId)
+ *     → Refuse la demande d'un RESPONSABLE_CLUB (is_active = false).
+ *
+ *   cancelEvent(userId, eventId)
+ *     → Annule (is_active=false) + supprime notifs EVENT_UPDATED/REMINDER
+ *       + envoie notif d'annulation à chaque participant CONFIRME/EN_ATTENTE.
+ *
+ *   checkLocalAvailability(localId, date, start, end, excludeEventId?)
+ *     → findConflicts + checkAvailability (réservations).
+ *     → Retourne { available, conflicts, durationMinutes }.
+ *
+ *   registerToEvent(eventId, userId)
+ *     → Inscription EN_ATTENTE. Réinscription si ANNULE/REFUSE. Doublon si CONFIRME/EN_ATTENTE.
+ *
+ *   cancelMyRegistration(eventId, userId)
+ *     → Annule inscription + promoteWaitlistIfPossible.
+ *
+ *   listParticipants(eventId, requesterId)
+ *     → { confirmed, waitingList, refused, cancelled, all } avec RBAC.
+ *
+ *   updateParticipantStatus(eventId, participantId, status, requesterId)
+ *     → Vérifie capacité si CONFIRME (excludeId). Promeut waitlist si REFUSE/ANNULE.
+ *     → Notifie le participant si CONFIRME ou REFUSE.
+ *
+ *   setParticipantCheckin(eventId, participantId, checkin, requesterId)
+ *     → Marque présent/absent par responsable.
+ *     → SQL atomique pour points (WHERE points_awarded=false RETURNING user_id).
+ *
+ *   selfCheckin(eventId, userId)
+ *     → Auto check-in par le participant. Même logique SQL atomique que ci-dessus.
+ *
+ *   promoteWaitlistIfPossible(eventId) [privée]
+ *     → Promeut les N premiers EN_ATTENTE vers CONFIRME selon places disponibles.
+ */
+
 import {
   BadRequestException,
   ForbiddenException,
@@ -30,23 +198,31 @@ export class EventsService {
     'ANNULE',
   ] as const;
 
+  /** Ajoute N jours à une date (immuable). */
   private addDays(baseDate: Date, days: number) {
     const copy = new Date(baseDate);
     copy.setDate(copy.getDate() + days);
     return copy;
   }
 
+  /** Ajoute N mois à une date (immuable). */
   private addMonths(baseDate: Date, months: number) {
     const copy = new Date(baseDate);
     copy.setMonth(copy.getMonth() + months);
     return copy;
   }
 
+  /** Normalise une Date à minuit UTC+0 (supprime la composante horaire). */
   private normalizeDateOnly(dateValue: Date) {
     const dateStr = dateValue.toISOString().split('T')[0];
     return new Date(`${dateStr}T00:00:00`);
   }
 
+  /**
+   * Génère les dates d'occurrence selon le type de récurrence (NONE/DAILY/WEEKLY/MONTHLY).
+   * Limite à 52 occurrences max. Arrêt si la date dépasse recurrenceUntil.
+   * NOTE : désactivé en production (create() utilise toujours 1 seule occurrence).
+   */
   private buildOccurrenceDates(
     baseDate: Date,
     recurrenceType?: 'NONE' | 'DAILY' | 'WEEKLY' | 'MONTHLY',
@@ -92,23 +268,32 @@ export class EventsService {
     return occurrences;
   }
 
+  /** Combine une date et un horaire (HH:mm ou HH:mm:ss) en un objet Date complet. */
   private buildTimeOnDate(date: Date, time: string) {
     const datePart = date.toISOString().split('T')[0];
     const normalizedTime = time.length === 5 ? `${time}:00` : time;
     return new Date(`${datePart}T${normalizedTime}`);
   }
 
+  /** Normalise un horaire en "HH:mm" (ajoute des zéros si nécessaire). */
   private normalizeTimeToHHMM(value: string) {
     const [h, m] = value.split(':');
     return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
   }
 
+  /** Convertit un horaire "HH:mm" en nombre de minutes depuis minuit. */
   private timeToMinutes(value: string) {
     const normalized = this.normalizeTimeToHHMM(value);
     const [h, m] = normalized.split(':').map(Number);
     return h * 60 + m;
   }
 
+  /**
+   * Valide et normalise le programme détaillé (timeline) de l'événement.
+   * Vérifie : titre, formats horaires, end > start, bornes de l'événement.
+   * Trie les étapes par start_time et vérifie l'absence de chevauchement.
+   * Retourne undefined si pas de timeline, [] si tableau vide.
+   */
   private normalizeTimeline(
     timeline:
       | Array<{
@@ -196,6 +381,14 @@ export class EventsService {
     }));
   }
 
+  /**
+   * Cherche les événements actifs en conflit sur le même local et la même date.
+   * 3 cas de chevauchement (OR) — identique à checkAvailability des réservations :
+   *   [0] start ≤ debut AND end > debut   → nouveau commence pendant un existant
+   *   [1] start < fin   AND end ≥ fin     → nouveau finit pendant un existant
+   *   [2] start ≥ debut AND end ≤ fin     → nouveau totalement englobé dans existant
+   * excludeEventId : auto-exclusion lors d'une modification d'événement.
+   */
   private async findConflicts(
     localId: string,
     dateEvent: Date,
@@ -235,6 +428,7 @@ export class EventsService {
     });
   }
 
+  /** Charge l'utilisateur (id, role, id_centre). Lève NotFoundException si absent. */
   private async resolveRequester(userId: string) {
     const user = await this.prisma.utilisateurs.findUnique({
       where: { id: userId },
@@ -248,6 +442,7 @@ export class EventsService {
     return user;
   }
 
+  /** Parse et valide les dates/heures. BadRequestException si invalide ou end ≤ start. */
   private buildDateTimes(
     dateEvent: string,
     startTime: string,
@@ -277,6 +472,7 @@ export class EventsService {
     return { eventDate, startDateTime, endDateTime };
   }
 
+  /** Charge local + club en parallèle (Promise.all). Vérifie existence, club actif, même centre. */
   private async resolveLocalAndClub(locauxId: string, clubId: string) {
     const [local, club] = await Promise.all([
       this.prisma.locaux.findUnique({
@@ -312,6 +508,7 @@ export class EventsService {
     return { local, club };
   }
 
+  /** Charge uniquement le local (id, id_centre, nom). NotFoundException si absent. */
   private async resolveLocal(locauxId: string) {
     const local = await this.prisma.locaux.findUnique({
       where: { id: locauxId },
@@ -325,6 +522,10 @@ export class EventsService {
     return local;
   }
 
+  /**
+   * Déduplique et fusionne club_id + club_ids en liste unique.
+   * Retourne { primaryClubId (premier), collaboratingClubIds (reste) }.
+   */
   private normalizeClubSelection(clubId?: string | null, clubIds?: string[]) {
     const uniqueIds = Array.from(
       new Set([clubId, ...(clubIds ?? [])].filter(Boolean) as string[]),
@@ -336,6 +537,7 @@ export class EventsService {
     };
   }
 
+  /** Retourne les IDs des clubs actifs dont l'utilisateur est id_coach. */
   private async getManagedClubIds(userId: string) {
     const clubs = await this.prisma.clubs.findMany({
       where: { id_coach: userId, est_actif: true },
@@ -345,6 +547,12 @@ export class EventsService {
     return clubs.map((club) => club.id);
   }
 
+  /**
+   * Valide tous les clubs associés à l'événement.
+   * Vérifie : existence, statut actif, même centre que le local.
+   * RESPONSABLE_CLUB doit gérer au moins un des clubs associés.
+   * Retourne { primaryClub, collaboratingClubIds }.
+   */
   private async resolveClubsForEvent(
     localCentreId: string,
     primaryClubId: string | null,
@@ -415,6 +623,13 @@ export class EventsService {
     return { primaryClub, collaboratingClubIds: collaboratingIds };
   }
 
+  /**
+   * Vérifie le droit de gérer un événement (RBAC) :
+   *   ADMIN       → toujours autorisé
+   *   RESP_CENTRE → id_centre = centre du local
+   *   RESP_CLUB   → id_coach = id du responsable
+   *   Autres      → ForbiddenException
+   */
   private assertCanManageEvent(
     requester: Pick<utilisateurs, 'id' | 'role' | 'id_centre'>,
     localCentreId: string,
@@ -450,6 +665,7 @@ export class EventsService {
     throw new ForbiddenException('Role non autorise pour gerer les evenements');
   }
 
+  /** Charge l'événement avec club et local. NotFoundException si absent. */
   private async resolveEventForManagement(eventId: string) {
     const event = await this.prisma.events.findUnique({
       where: { id: eventId },
@@ -466,6 +682,7 @@ export class EventsService {
     return event;
   }
 
+  /** Compte les participants CONFIRMÉS. excludeId : exclut un participant (pattern update). */
   private async countConfirmedParticipants(
     eventId: string,
     excludeId?: string,
@@ -479,6 +696,11 @@ export class EventsService {
     });
   }
 
+  /**
+   * Charge en parallèle les statistiques de feedback pour un événement.
+   * Promise.all : stats agrégées, 10 derniers feedbacks, mon feedback, ma participation, start_time.
+   * canRate = vrai si participé (CONFIRME ou ANNULE) ET start_time ≤ now.
+   */
   private async buildFeedbackSummary(eventId: string, userId: string) {
     const [stats, recentFeedbacks, myFeedback, myParticipation, event] =
       await Promise.all([
@@ -542,6 +764,13 @@ export class EventsService {
     };
   }
 
+  /**
+   * Construit le filtre Prisma de visibilité selon le rôle :
+   *   ADMIN       → tout (ou actifs si !includeInactive)
+   *   RESP_CENTRE → son centre (local.id_centre)
+   *   RESP_CLUB   → ses clubs (id_coach OU hasSome collaborating_club_ids)
+   *   Autres      → { is_active: true }
+   */
   private async buildVisibilityWhere(
     requester: Pick<utilisateurs, 'id' | 'role' | 'id_centre'>,
     includeInactive: boolean,
@@ -580,6 +809,14 @@ export class EventsService {
     return { is_active: true };
   }
 
+  /**
+   * Crée un événement. Pipeline :
+   *   1. Résolution demandeur/local/clubs → RBAC
+   *   2. buildDateTimes + normalizeTimeline
+   *   3. Vérification conflits (findConflicts events + checkAvailability réservations)
+   *   4. $transaction : create event (is_active=false si RESP_CLUB) + createMany réservations VALIDEE
+   * Retourne { createdCount, events }.
+   */
   async create(userId: string, dto: CreateEventDto) {
     const requester = await this.resolveRequester(userId);
     const local = await this.resolveLocal(dto.locaux_id);
@@ -755,6 +992,10 @@ export class EventsService {
     };
   }
 
+  /**
+   * Liste les événements selon la visibilité du rôle (buildVisibilityWhere).
+   * Inclut club, local, _count participants. Trié date_event + start_time ASC.
+   */
   async findAll(userId: string, includeInactive = false) {
     const requester = await this.resolveRequester(userId);
     const where = await this.buildVisibilityWhere(requester, includeInactive);
@@ -770,6 +1011,12 @@ export class EventsService {
     });
   }
 
+  /**
+   * Tableau de bord analytique. Filtrable par centreId ou gouvernorat.
+   * Agrégation JS en mémoire via Maps (clubStatsMap, userStatsMap, frequencyMap).
+   * Retourne : top 5 events, top 8 clubs, top 10 utilisateurs, fréquence mensuelle,
+   *   tauxParticipation (events avec participants / total), tauxRemplissage (confirmés / capacité).
+   */
   async getDashboardStats(userId: string, includeInactive = false, centreId?: string, gouvernorat?: string) {
     const requester = await this.resolveRequester(userId);
     const where = await this.buildVisibilityWhere(requester, includeInactive);
@@ -971,6 +1218,10 @@ export class EventsService {
     };
   }
 
+  /**
+   * Événements de l'utilisateur : inscrit (non ANNULE) OU membre ACCEPTE du club lié.
+   * Ajoute my_participation_status + my_participation_checkin à chaque résultat.
+   */
   async findMyParticipations(userId: string, includeInactive = true) {
     await this.resolveRequester(userId);
 
@@ -1023,6 +1274,12 @@ export class EventsService {
     });
   }
 
+  /**
+   * Détail complet d'un événement avec participants, créateur, feedback.
+   * RBAC : RESP_CENTRE → son centre, RESP_CLUB → ses clubs OU membre OU participant.
+   * Autres → seulement si is_active (sauf participant non annulé).
+   * Fusionne buildFeedbackSummary dans la réponse.
+   */
   async findOne(userId: string, eventId: string) {
     const requester = await this.resolveRequester(userId);
 
@@ -1138,6 +1395,7 @@ export class EventsService {
     };
   }
 
+  /** Vérifie existence + droits (findOne) → retourne buildFeedbackSummary. */
   async getEventFeedback(eventId: string, userId: string) {
     const event = await this.prisma.events.findUnique({
       where: { id: eventId },
@@ -1152,6 +1410,11 @@ export class EventsService {
     return this.buildFeedbackSummary(eventId, userId);
   }
 
+  /**
+   * Soumet ou modifie un feedback (upsert clé composite event_id_user_id).
+   * Conditions : participation CONFIRME/ANNULE + start_time ≤ now + note 1-5 + commentaire ≤ 500c.
+   * Retourne { feedback, ratingAverage, ratingCount }.
+   */
   async submitEventFeedback(
     eventId: string,
     userId: string,
@@ -1240,6 +1503,11 @@ export class EventsService {
     };
   }
 
+  /**
+   * Modifie un événement. Double RBAC (avant + après changement local/clubs).
+   * findConflicts avec excludeEventId. Détecte les champs modifiés.
+   * Supprime anciennes notifs EVENT_UPDATED/REMINDER → envoie nouvelles aux participants.
+   */
   async update(userId: string, eventId: string, dto: UpdateEventDto) {
     const requester = await this.resolveRequester(userId);
 
@@ -1440,6 +1708,10 @@ export class EventsService {
     return updatedEvent;
   }
 
+  /**
+   * Active (true) ou désactive (false) un événement.
+   * RBAC via assertCanManageEvent. Sans notifications (utiliser cancelEvent pour les notifs).
+   */
   async setActive(userId: string, eventId: string, isActive: boolean) {
     const requester = await this.resolveRequester(userId);
 
@@ -1470,6 +1742,7 @@ export class EventsService {
     });
   }
 
+  /** Refuse la demande d'événement d'un RESPONSABLE_CLUB (is_active = false). RBAC requis. */
   async refuseEventRequest(userId: string, eventId: string) {
     const requester = await this.resolveRequester(userId);
 
@@ -1500,6 +1773,11 @@ export class EventsService {
     });
   }
 
+  /**
+   * Annule un événement actif (is_active = false).
+   * Supprime notifs EVENT_UPDATED/EVENT_REMINDER liées à l'événement.
+   * Envoie notification d'annulation à tous les participants CONFIRME/EN_ATTENTE.
+   */
   async cancelEvent(userId: string, eventId: string) {
     const requester = await this.resolveRequester(userId);
 
@@ -1582,6 +1860,15 @@ export class EventsService {
     return updatedEvent;
   }
 
+  /**
+   * Vérifie si un créneau est libre dans un local.
+   * Double vérification : findConflicts (events) + checkAvailability (réservations).
+   * Retourne { available, conflicts, durationMinutes }.
+   *
+   * Lors d'une modification (excludeEventId fourni), la réservation automatique
+   * créée pour cet événement est retrouvée et exclue du contrôle des réservations
+   * pour éviter un faux conflit quand le créneau reste inchangé.
+   */
   async checkLocalAvailability(
     localId: string,
     date: string,
@@ -1609,11 +1896,43 @@ export class EventsService {
       excludeEventId,
     );
 
+    // Retrouver la réservation automatique liée à l'événement en cours de modification
+    // pour l'exclure du contrôle et éviter un faux conflit sur le même créneau.
+    let excludeReservationId: string | undefined;
+    if (excludeEventId) {
+      const originalEvent = await this.prisma.events.findUnique({
+        where: { id: excludeEventId },
+        select: {
+          locaux_id: true,
+          date_event: true,
+          start_time: true,
+          end_time: true,
+        },
+      });
+      if (originalEvent) {
+        const linkedReservation = await this.prisma.reservations_locaux.findFirst({
+          where: {
+            id_local: originalEvent.locaux_id,
+            date_reservation: originalEvent.date_event,
+            heure_debut: originalEvent.start_time,
+            heure_fin: originalEvent.end_time,
+            statut: 'VALIDEE',
+            objet: { startsWith: 'Réservation pour événement:' },
+          },
+          select: { id: true },
+        });
+        if (linkedReservation) {
+          excludeReservationId = linkedReservation.id;
+        }
+      }
+    }
+
     const reservationsFree = await this.reservationsService.checkAvailability(
       localId,
       date,
       start,
       end,
+      excludeReservationId,
     );
 
     return {
@@ -1625,6 +1944,10 @@ export class EventsService {
     };
   }
 
+  /**
+   * Inscrit un utilisateur à un événement (statut EN_ATTENTE).
+   * Si ANNULE/REFUSE précédemment → réinscription (update). Si CONFIRME/EN_ATTENTE → doublon.
+   */
   async registerToEvent(eventId: string, userId: string) {
     const event = await this.prisma.events.findUnique({
       where: { id: eventId },
@@ -1699,6 +2022,7 @@ export class EventsService {
     });
   }
 
+  /** Annule l'inscription (ANNULE + checkin=false). Déclenche promoteWaitlistIfPossible. */
   async cancelMyRegistration(eventId: string, userId: string) {
     const participant = await this.prisma.event_participants.findUnique({
       where: {
@@ -1722,6 +2046,10 @@ export class EventsService {
     return updated;
   }
 
+  /**
+   * Liste les participants groupés par statut : confirmed, waitingList, refused, cancelled, all.
+   * RESP_CENTRE → son centre. RESP_CLUB → ses clubs.
+   */
   async listParticipants(eventId: string, requesterId: string) {
     const requester = await this.resolveRequester(requesterId);
     const event = await this.resolveEventForManagement(eventId);
@@ -1766,6 +2094,12 @@ export class EventsService {
     };
   }
 
+  /**
+   * Change le statut d'un participant. RBAC via assertCanManageEvent.
+   * CONFIRME → vérifie capacité (countConfirmedParticipants avec excludeId).
+   * REFUSE/ANNULE → déclenche promoteWaitlistIfPossible.
+   * CONFIRME/REFUSE → notification push au participant.
+   */
   async updateParticipantStatus(
     eventId: string,
     participantId: string,
@@ -1856,6 +2190,12 @@ export class EventsService {
     return updated;
   }
 
+  /**
+   * Marque présent/absent un participant (par responsable).
+   * checkin=true : vérifie CONFIRME + événement en cours (start ≤ now ≤ end).
+   * SQL atomique (WHERE points_awarded=false RETURNING user_id) → points idempotents.
+   * Si points accordés → UPDATE utilisateurs + notification push.
+   */
   async setParticipantCheckin(
     eventId: string,
     participantId: string,
@@ -1990,6 +2330,11 @@ export class EventsService {
     });
   }
 
+  /**
+   * Auto check-in par le participant pendant l'événement.
+   * Conditions : actif + en cours (start ≤ now ≤ end) + CONFIRME + pas encore checkin.
+   * Même SQL atomique que setParticipantCheckin → points + notification push.
+   */
   async selfCheckin(eventId: string, userId: string) {
     const event = await this.prisma.events.findUnique({
       where: { id: eventId },
@@ -2127,6 +2472,11 @@ export class EventsService {
     });
   }
 
+  /**
+   * Promeut les EN_ATTENTE vers CONFIRME selon les places disponibles (capacity - confirmedCount).
+   * Promeut les N premiers triés par created_at ASC (ordre d'arrivée).
+   * Appelée après cancelMyRegistration et updateParticipantStatus(REFUSE/ANNULE).
+   */
   private async promoteWaitlistIfPossible(eventId: string) {
     const event = await this.prisma.events.findUnique({
       where: { id: eventId },

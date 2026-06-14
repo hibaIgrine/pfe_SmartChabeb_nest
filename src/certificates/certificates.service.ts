@@ -1,3 +1,61 @@
+/**
+ * ============================================================
+ * FICHIER : certificates.service.ts
+ * RÔLE    : Logique métier de génération de certificats de participation.
+ * ============================================================
+ *
+ * CONSTANTE :
+ *   CERTIFICATE_SERVICE_URL = 'http://localhost:5000'
+ *     URL du micro-service Python/Flask de génération graphique SVG.
+ *     Le service doit être démarré manuellement : `python app.py` dans certificate-service/.
+ *
+ * MÉTHODES :
+ *
+ * ─── generateParticipantCertificate(eventId, userId) ───────────────────────
+ *   Génère un certificat SVG pour un participant confirmé et présent.
+ *
+ *   ÉTAPE 1 — Validation de l'événement :
+ *     findUnique(events) avec include club + local.centre.
+ *     Si absent → BadRequestException.
+ *     Si event.end_time > now → BadRequestException (événement non terminé).
+ *
+ *   ÉTAPE 2 — Validation de la participation :
+ *     findFirst(event_participants) WHERE event_id + user_id, include user.nom/prenom.
+ *     Si absent → "Vous n'êtes pas inscrit à cet événement".
+ *     Si status ≠ 'CONFIRME' → "Seuls les participants confirmés...".
+ *     Si checkin !== true → "Vous devez être marqué présent...".
+ *
+ *   ÉTAPE 3 — Construction du payload :
+ *     nom_complet = "${prenom} ${nom}".trim()
+ *     centerName  = event.local?.centre?.nom || 'Maison de Jeunes'
+ *     eventDate   = date_event.toLocaleDateString('fr-FR', { year, month: 'long', day })
+ *     Les clés sont dupliquées (nom_complet/nom_etudiant, nom_centre/maison_jeune, date_event/date)
+ *     pour couvrir toutes les variantes acceptées par _pick_text() dans Flask.
+ *
+ *   ÉTAPE 4 — Appel Flask (fetch Node 18+) :
+ *     POST http://localhost:5000/generate-certificate-binary
+ *     Content-Type: application/json
+ *     Corps : payload JSON
+ *
+ *   ÉTAPE 5 — Validation de la réponse Flask :
+ *     resp.ok sinon InternalServerErrorException avec corps Flask tronqué (300 chars).
+ *     contentType doit contenir 'application/json'.
+ *     responseData.image doit être présent.
+ *
+ *   RETOUR : { success, image: "data:image/svg+xml;base64,...", filename, eventName, participantName }
+ *
+ *   GESTION D'ERREUR :
+ *     InternalServerErrorException relancée telle quelle.
+ *     Autres erreurs (fetch échoue, Flask down) → message d'indication pour démarrer Flask.
+ *
+ * ─── getUserAttendanceHistory(userId) ──────────────────────────────────────
+ *   Retourne les événements passés où l'utilisateur était CONFIRME + checkin=true.
+ *   WHERE event.end_time < now, triés par date_event DESC.
+ *   Retourne pour chaque event : eventId, eventName, clubName, centerName, date, status, present, pointsAwarded.
+ *
+ * NOTE : `declare const fetch: any` — utilise le fetch global de Node 18+.
+ */
+
 import {
   Injectable,
   BadRequestException,

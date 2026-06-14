@@ -1,7 +1,82 @@
+/**
+ * ============================================================
+ * FICHIER : notifications.service.ts
+ * RÔLE    : Création et gestion des notifications in-app pour les utilisateurs.
+ * ============================================================
+ *
+ * ARCHITECTURE :
+ *   Ce service est un "producteur" de notifications. Il est injecté dans tous
+ *   les modules qui ont besoin d'envoyer des notifications (Events, Reservations,
+ *   Clubs, Posts, ClubTasks, EventRequestCreations).
+ *   Le controller ne crée jamais de notifications — il ne fait que les lire.
+ *
+ * TYPES TYPESCRIPT (payloads internes) :
+ *   Chaque méthode de création accepte un payload typé (non exposé en HTTP) :
+ *   - MembershipDecisionPayload      → adhésion acceptée/refusée
+ *   - ReservationDecisionPayload     → réservation validée/refusée
+ *   - EventParticipationDecisionPayload → inscription confirmée/refusée
+ *   - EventUpdatePayload             → événement modifié (changes: string[])
+ *   - EventCancellationPayload       → événement annulé
+ *   - PointsEarnedPayload            → points gagnés lors d'un check-in
+ *   - ClubCreationDecisionPayload    → demande de club acceptée/refusée
+ *   - ClubTaskNotificationPayload    → tâche assignée/mise à jour/complétée/rappel
+ *   - PostReactionNotificationPayload   → réaction sur un post
+ *   - PostCommentNotificationPayload    → commentaire sur un post
+ *   - PostCommentReplyNotificationPayload → réponse à un commentaire
+ *   - PostMentionNotificationPayload    → mention dans un post
+ *   - PostCommentMentionNotificationPayload → mention dans un commentaire
+ *
+ * MÉTHODES DE CRÉATION (publiques, appelées par les autres services) :
+ *   createMembershipDecisionNotification     → ADHESION_ACCEPTED | ADHESION_REJECTED
+ *   createReservationDecisionNotification    → RESERVATION_ACCEPTED | RESERVATION_REJECTED
+ *   createEventParticipationDecisionNotification → EVENT_PARTICIPATION_CONFIRMED | EVENT_PARTICIPATION_REFUSED
+ *   createEventUpdateNotification            → EVENT_UPDATED (changes[] joint par ", ")
+ *   createEventCancellationNotification      → EVENT_CANCELLED
+ *   createPointsEarnedNotification           → POINTS_EARNED
+ *   createClubCreationDecisionNotification   → CLUB_CREATION_ACCEPTED | CLUB_CREATION_REJECTED
+ *   createClubTaskNotification               → TASK_ASSIGNED | TASK_UPDATED | TASK_COMPLETED | TASK_REMINDER
+ *   createPostCommentNotification            → POST_COMMENT
+ *   createPostCommentReplyNotification       → POST_COMMENT_REPLY
+ *   createPostReactionNotification           → POST_REACTION
+ *   createPostMentionNotification            → POST_MENTION
+ *   createPostCommentMentionNotification     → POST_COMMENT_MENTION
+ *
+ * MÉTHODES DE LECTURE (publiques, appelées par le controller) :
+ *   getMyNotifications(userId, limit)   → findMany triées par created_at DESC, limit clampé 1-100
+ *                                         DÉCLENCHE AUSSI les rappels lazy 24h
+ *   getMyUnreadCount(userId)            → count WHERE is_read=false
+ *                                         DÉCLENCHE AUSSI les rappels lazy 24h
+ *   markAsRead(userId, notificationId)  → updateMany WHERE id + id_utilisateur → is_read=true
+ *   markAllAsRead(userId)               → updateMany WHERE id_utilisateur + is_read=false
+ *
+ * RAPPELS AUTOMATIQUES LAZY (méthodes privées) :
+ *   createUpcomingEventReminders(userId)
+ *     → Cherche les participations CONFIRME à des événements actifs dans les 24h.
+ *     → Crée une notif EVENT_REMINDER par événement (idempotent : vérifie
+ *       l'existence via data.path['eventId'] avant création).
+ *     → Max 20 rappels par appel (take: 20).
+ *
+ *   createUpcomingTaskReminders(userId)
+ *     → Cherche les tâches (créées ou affectées) avec date_limite dans les 24h,
+ *       statut EN_ATTENTE | EN_COURS | A_FAIRE.
+ *     → Crée une notif TASK_REMINDER par tâche (idempotent : vérifie data.path['taskId']).
+ *     → Max 20 rappels par appel (take: 20).
+ *
+ * UTILITAIRES PRIVÉS :
+ *   formatDate(date) → toLocaleDateString('fr-FR', {day,month,year,UTC}) → "15/01/2024"
+ *   formatTime(date) → toLocaleTimeString('fr-FR', {hour,minute,hour12:false,UTC}) → "09:30"
+ *
+ * CHAMP `data` :
+ *   JSON stocké en BDD. Contient les métadonnées propres à chaque type de notification
+ *   (ex: eventId, clubNom, reservationId...) pour que le front-end puisse construire
+ *   des liens de navigation vers la ressource concernée.
+ */
+
 import { Prisma } from '@prisma/client';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 
+/** Payload pour notifier une décision d'adhésion à un club (acceptée ou refusée) */
 type MembershipDecisionPayload = {
   utilisateurId: string;
   clubId: string;
@@ -11,6 +86,7 @@ type MembershipDecisionPayload = {
   responsableId?: string;
 };
 
+/** Payload pour notifier une décision de réservation de local (validée ou refusée) */
 type ReservationDecisionPayload = {
   utilisateurId: string;
   reservationId: string;
@@ -23,6 +99,7 @@ type ReservationDecisionPayload = {
   adminId?: string;
 };
 
+/** Payload pour notifier une décision de participation à un événement (confirmée ou refusée) */
 type EventParticipationDecisionPayload = {
   utilisateurId: string;
   eventId: string;
@@ -36,6 +113,7 @@ type EventParticipationDecisionPayload = {
   responsableId?: string;
 };
 
+/** Payload pour notifier une modification d'événement — changes[] liste les champs modifiés */
 type EventUpdatePayload = {
   utilisateurId: string;
   eventId: string;
@@ -53,6 +131,7 @@ type EventUpdatePayload = {
   responsableId?: string;
 };
 
+/** Payload pour notifier l'annulation d'un événement auquel le participant était inscrit */
 type EventCancellationPayload = {
   utilisateurId: string;
   eventId: string;
@@ -66,6 +145,7 @@ type EventCancellationPayload = {
   responsableId?: string;
 };
 
+/** Payload pour notifier l'attribution de points suite à un check-in événement */
 type PointsEarnedPayload = {
   utilisateurId: string;
   eventId: string;
@@ -73,6 +153,7 @@ type PointsEarnedPayload = {
   points: number;
 };
 
+/** Payload pour notifier une décision sur une demande de création de club */
 type ClubCreationDecisionPayload = {
   utilisateurId: string;
   demandeId: string;
@@ -82,6 +163,7 @@ type ClubCreationDecisionPayload = {
   reviewedBy?: string;
 };
 
+/** Payload générique pour les notifications de tâches de club (assignation, mise à jour, complétion, rappel) */
 type ClubTaskNotificationPayload = {
   utilisateurId: string;
   type: 'TASK_ASSIGNED' | 'TASK_UPDATED' | 'TASK_COMPLETED' | 'TASK_REMINDER';
@@ -90,6 +172,7 @@ type ClubTaskNotificationPayload = {
   data?: Record<string, unknown>;
 };
 
+/** Payload pour notifier l'auteur d'un post qu'un utilisateur a réagi à sa publication */
 type PostReactionNotificationPayload = {
   utilisateurId: string;
   postId: string;
@@ -99,6 +182,7 @@ type PostReactionNotificationPayload = {
   reactionLabel: string;
 };
 
+/** Payload pour notifier l'auteur d'un post qu'un utilisateur a commenté sa publication */
 type PostCommentNotificationPayload = {
   utilisateurId: string;
   postId: string;
@@ -107,6 +191,7 @@ type PostCommentNotificationPayload = {
   commenterNomComplet: string;
 };
 
+/** Payload pour notifier l'auteur d'un commentaire qu'une réponse lui a été faite */
 type PostCommentReplyNotificationPayload = {
   utilisateurId: string;
   postId: string;
@@ -116,6 +201,7 @@ type PostCommentReplyNotificationPayload = {
   replierNomComplet: string;
 };
 
+/** Payload pour notifier un utilisateur qu'il a été mentionné dans un post */
 type PostMentionNotificationPayload = {
   utilisateurId: string;
   postId: string;
@@ -123,6 +209,7 @@ type PostMentionNotificationPayload = {
   auteurNomComplet: string;
 };
 
+/** Payload pour notifier un utilisateur qu'il a été mentionné dans un commentaire */
 type PostCommentMentionNotificationPayload = {
   utilisateurId: string;
   postId: string;
@@ -135,6 +222,7 @@ type PostCommentMentionNotificationPayload = {
 export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Notif tâche générique — type passé directement dans le payload (TASK_ASSIGNED, TASK_UPDATED, TASK_COMPLETED, TASK_REMINDER). */
   async createClubTaskNotification(payload: ClubTaskNotificationPayload) {
     return this.prisma.notifications.create({
       data: {
@@ -156,6 +244,7 @@ export class NotificationsService {
     });
   }
 
+  /** POST_COMMENT — notifie l'auteur du post qu'un commentaire a été posté. */
   async createPostCommentNotification(payload: PostCommentNotificationPayload) {
     return this.prisma.notifications.create({
       data: {
@@ -182,6 +271,7 @@ export class NotificationsService {
     });
   }
 
+  /** POST_COMMENT_REPLY — notifie l'auteur du commentaire parent qu'une réponse lui a été faite. */
   async createPostCommentReplyNotification(
     payload: PostCommentReplyNotificationPayload,
   ) {
@@ -211,6 +301,7 @@ export class NotificationsService {
     });
   }
 
+  /** POST_REACTION — notifie l'auteur du post qu'un utilisateur a réagi (reactionLabel dans le message). */
   async createPostReactionNotification(
     payload: PostReactionNotificationPayload,
   ) {
@@ -240,6 +331,7 @@ export class NotificationsService {
     });
   }
 
+  /** POST_MENTION — notifie l'utilisateur mentionné dans un post (@mention). */
   async createPostMentionNotification(payload: PostMentionNotificationPayload) {
     return this.prisma.notifications.create({
       data: {
@@ -265,6 +357,7 @@ export class NotificationsService {
     });
   }
 
+  /** POST_COMMENT_MENTION — notifie l'utilisateur mentionné dans un commentaire (@mention). */
   async createPostCommentMentionNotification(
     payload: PostCommentMentionNotificationPayload,
   ) {
@@ -293,6 +386,7 @@ export class NotificationsService {
     });
   }
 
+  /** CLUB_CREATION_ACCEPTED / CLUB_CREATION_REJECTED — notifie le demandeur de la décision sur sa demande de club. */
   async createClubCreationDecisionNotification(
     payload: ClubCreationDecisionPayload,
   ) {
@@ -326,6 +420,11 @@ export class NotificationsService {
     });
   }
 
+  /**
+   * Crée des rappels EVENT_REMINDER pour les événements dans les 24h à venir.
+   * Idempotent : vérifie l'existence via data->>'eventId' avant toute création.
+   * Appelé de manière lazy par getMyNotifications() et getMyUnreadCount().
+   */
   private async createUpcomingEventReminders(utilisateurId: string) {
     const now = new Date();
     const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
@@ -406,6 +505,11 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * Crée des rappels TASK_REMINDER pour les tâches (créées ou affectées) dans les 24h.
+   * Statuts ciblés : EN_ATTENTE | EN_COURS | A_FAIRE. Idempotent via data->>'taskId'.
+   * Appelé de manière lazy par getMyNotifications() et getMyUnreadCount().
+   */
   private async createUpcomingTaskReminders(utilisateurId: string) {
     const now = new Date();
     const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
@@ -484,6 +588,7 @@ export class NotificationsService {
     }
   }
 
+  /** Formate une date en heure "HH:MM" (locale fr-FR, fuseau UTC). Ex: "09:30" */
   private formatTime(date: Date) {
     return date.toLocaleTimeString('fr-FR', {
       hour: '2-digit',
@@ -493,6 +598,7 @@ export class NotificationsService {
     });
   }
 
+  /** Formate une date en "JJ/MM/AAAA" (locale fr-FR, fuseau UTC). Ex: "15/01/2024" */
   private formatDate(date: Date) {
     return date.toLocaleDateString('fr-FR', {
       day: '2-digit',
@@ -502,6 +608,7 @@ export class NotificationsService {
     });
   }
 
+  /** ADHESION_ACCEPTED / ADHESION_REJECTED — notifie le demandeur de la décision d'adhésion à un club. */
   async createMembershipDecisionNotification(
     payload: MembershipDecisionPayload,
   ) {
@@ -535,6 +642,10 @@ export class NotificationsService {
     });
   }
 
+  /**
+   * RESERVATION_ACCEPTED / RESERVATION_REJECTED — notifie le demandeur de la décision.
+   * Si VALIDEE, le message invite à procéder au paiement pour finaliser la réservation.
+   */
   async createReservationDecisionNotification(
     payload: ReservationDecisionPayload,
   ) {
@@ -574,6 +685,7 @@ export class NotificationsService {
     });
   }
 
+  /** EVENT_PARTICIPATION_CONFIRMED / EVENT_PARTICIPATION_REFUSED — notifie le participant de la décision. */
   async createEventParticipationDecisionNotification(
     payload: EventParticipationDecisionPayload,
   ) {
@@ -618,6 +730,11 @@ export class NotificationsService {
     });
   }
 
+  /**
+   * EVENT_UPDATED — notifie les participants CONFIRME/EN_ATTENTE d'une modification.
+   * changes[] liste les champs modifiés (ex: ['date', 'heure']) — joint par ", " dans le message.
+   * dateEventText/startTimeText/endTimeText permettent d'injecter un texte pré-formaté.
+   */
   async createEventUpdateNotification(payload: EventUpdatePayload) {
     const dateLabel =
       payload.dateEventText ?? this.formatDate(payload.dateEvent);
@@ -660,6 +777,7 @@ export class NotificationsService {
     });
   }
 
+  /** EVENT_CANCELLED — notifie les participants CONFIRME/EN_ATTENTE de l'annulation de l'événement. */
   async createEventCancellationNotification(payload: EventCancellationPayload) {
     const dateLabel = this.formatDate(payload.dateEvent);
     const startLabel = this.formatTime(payload.startTime);
@@ -695,6 +813,7 @@ export class NotificationsService {
     });
   }
 
+  /** POINTS_EARNED — notifie l'utilisateur du nombre de points gagnés lors du check-in événement. */
   async createPointsEarnedNotification(payload: PointsEarnedPayload) {
     return this.prisma.notifications.create({
       data: {
@@ -720,6 +839,10 @@ export class NotificationsService {
     });
   }
 
+  /**
+   * Retourne les notifications de l'utilisateur (triées created_at DESC, limit clampé 1-100).
+   * EFFET DE BORD LAZY : déclenche la création des rappels EVENT_REMINDER et TASK_REMINDER des 24h.
+   */
   async getMyNotifications(utilisateurId: string, limit = 20) {
     await this.createUpcomingEventReminders(utilisateurId);
     await this.createUpcomingTaskReminders(utilisateurId);
@@ -742,6 +865,10 @@ export class NotificationsService {
     });
   }
 
+  /**
+   * Retourne { count: N } — nombre de notifications non lues.
+   * EFFET DE BORD LAZY : déclenche la création des rappels 24h (même chose que getMyNotifications).
+   */
   async getMyUnreadCount(utilisateurId: string) {
     await this.createUpcomingEventReminders(utilisateurId);
     await this.createUpcomingTaskReminders(utilisateurId);
@@ -753,6 +880,10 @@ export class NotificationsService {
     return { count };
   }
 
+  /**
+   * Marque une notification comme lue. updateMany filtre sur (id + id_utilisateur)
+   * pour qu'un utilisateur ne puisse pas marquer les notifications d'un autre.
+   */
   async markAsRead(utilisateurId: string, notificationId: string) {
     await this.prisma.notifications.updateMany({
       where: { id: notificationId, id_utilisateur: utilisateurId },
@@ -762,6 +893,7 @@ export class NotificationsService {
     return { success: true };
   }
 
+  /** Marque toutes les notifications non lues de l'utilisateur comme lues (updateMany WHERE is_read=false). */
   async markAllAsRead(utilisateurId: string) {
     await this.prisma.notifications.updateMany({
       where: { id_utilisateur: utilisateurId, is_read: false },

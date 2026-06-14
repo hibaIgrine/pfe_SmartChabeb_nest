@@ -1,3 +1,7 @@
+/**
+ * Test unitaire minimal pour NotificationsService.
+ * Vérifie uniquement que le service est instanciable (PrismaService non fourni).
+ */
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotificationsService } from './notifications.service';
 

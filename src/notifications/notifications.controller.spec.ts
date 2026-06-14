@@ -1,3 +1,7 @@
+/**
+ * Test unitaire minimal pour NotificationsController.
+ * Vérifie uniquement que le controller est instanciable avec NotificationsService.
+ */
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';

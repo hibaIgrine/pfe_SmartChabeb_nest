@@ -1,3 +1,9 @@
+/**
+ * Test unitaire minimal pour RolesService.
+ * Vérifie uniquement que le service est instanciable dans un module de test NestJS.
+ * Aucune connexion BDD n'est établie — PrismaService n'est pas fourni dans ce test.
+ */
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { RolesService } from './roles.service';
 

@@ -1,3 +1,40 @@
+/**
+ * ============================================================
+ * FICHIER : recommendations.controller.ts
+ * RÔLE    : Routes HTTP pour la génération et la gestion des recommandations ML.
+ * ============================================================
+ *
+ * BASE URL : /recommendations
+ * Tout le controller est protégé par @UseGuards(AuthGuard('jwt')).
+ *
+ * ROUTES :
+ *
+ *   POST /recommendations/session/:sessionId    body?: { top_k?: number }
+ *     → Route principale de prédiction ML.
+ *     → Charge la session via sessionsService.findOne(sessionId).
+ *     → Valide top_k : doit être un entier dans [1, 10], défaut 3.
+ *         BadRequestException si hors bornes.
+ *         Math.floor() pour garantir un entier (protection contre 3.7).
+ *     → Appelle recoService.predict(session, topK) :
+ *         1. Construit le vecteur 30D depuis la session
+ *         2. POST http://localhost:5000/predict (Flask ML)
+ *         3. Persiste dans recommendation_history
+ *         4. Retourne { id, sessionId, recommandations[{activite, probabilite}],
+ *                       modele_utilise, activite_choisie: null, created_at }
+ *
+ *   GET /recommendations/session/:sessionId
+ *     → Historique de toutes les recommandations générées pour une session.
+ *     → Triées par created_at DESC.
+ *     → Permet au coach de voir ses précédentes prédictions pour cette session.
+ *
+ *   PATCH /recommendations/:id/choose            body: { activite: string }
+ *     → Valide le choix final du coach parmi les recommandations suggérées.
+ *     → Met à jour activite_choisie dans recommendation_history.
+ *     → Cette information est le "label terrain" pour le futur réentraînement
+ *       du modèle (feedback loop d'amélioration continue).
+ *     → :id (ParseIntPipe) = ID de la recommandation (pas de la session).
+ */
+
 import {
   BadRequestException,
   Controller,
